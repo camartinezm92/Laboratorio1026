@@ -1,0 +1,433 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: bloodTestRecords
+    // Document ID: auto-generated
+    // Fields:
+    //   - patientName: string (required, max 100 chars)
+    //   - patientId: string (required, max 50 chars)
+    //   - bloodGroup: string (required, enum: ['A', 'B', 'AB', 'O'])
+    //   - rh: string (required, enum: ['+', '-'])
+    //   - testDate: string (required, ISO 8601 format)
+    //   - result: string (required, max 200 chars)
+    //   - qualitySeal: string (required, max 100 chars)
+    //   - responsiblePerson: string (required, max 100 chars)
+    //   - signatureData: string (optional, base64 image data)
+    //   - createdAt: string (required, ISO 8601 format)
+    //   - unitId: string (optional, max 50 chars)
+    //   - unitGroup: string (optional, enum: ['A', 'B', 'AB', 'O'])
+    //   - unitRh: string (optional, enum: ['+', '-'])
+    //   - observations: string (optional, max 1000 chars)
+    //   - uid: string (required, matches creator's UID)
+    //
+    // Collection: users
+    // Document ID: user UID
+    // Fields:
+    //   - email: string
+    //   - role: string (enum: ['admin', 'user'])
+    //   - active: boolean
+    //   - permissions: map
+    //     - hemoderivados: map (crear, consultar, editar, eliminar, aceptar, devolver)
+    //     - laboratorio: map (crear, consultar)
+    //     - insumos: map (crear, consultar, consumir, eliminar)
+    //
+    // Collection: user_profiles
+    // Document ID: user UID
+    // Fields:
+    //   - uid: string
+    //   - email: string
+    //   - displayName: string (optional)
+    //   - photoURL: string (optional)
+    //   - lastLogin: string (ISO 8601)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (
+          isSuperAdmin() ||
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'user') == 'admin' && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('active', false) == true)
+        );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && 
+             (request.auth.token.email.lower() == "ingbiomedico@ucihonda.com.co" || 
+              request.auth.token.email.lower() == "apoyodiagnostico@hemosheet.iam.gserviceaccount.com");
+    }
+
+    function hasSectionPermission(section, action) {
+      return isAuthenticated() && 
+             (
+               isSuperAdmin() ||
+               (
+                 // Case 1: User document exists and is active
+                 exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+                 get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('active', false) == true &&
+                 (
+                   get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'user') == 'admin' ||
+                   get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('permissions', {}).get(section, {}).get(action, false) == true
+                 )
+               ) ||
+               (
+                 // Case 2: User document does not exist, but they are authenticated under our organization
+                 !exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+                 'email' in request.auth.token &&
+                 request.auth.token.email.lower().matches(".*@ucihonda\\.com\\.co$")
+               )
+             );
+    }
+
+    function hasHemoPermission(section, action) {
+      return hasSectionPermission('hemoderivados', action) || 
+             hasSectionPermission(section, action) ||
+             (section == 'disposicion' && hasSectionPermission('disposicionFinal', action));
+    }
+
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) ||
+        request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return isAdmin() || !('uid' in request.resource.data) ||
+        request.resource.data.uid == resource.data.uid;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidBloodGroup(group) {
+      return group in ['A', 'B', 'AB', 'O'];
+    }
+
+    function isValidRh(rh) {
+      return rh in ['+', '-'];
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string &&
+        dateStr.matches("^\\d{4}-\\d{2}-\\d{2}.*");
+    }
+
+    // Domain Validator
+    function isValidBloodTestRecord(data) {
+      return hasRequiredFields(['patientName', 'patientId', 'bloodGroup', 'rh', 'testDate', 'result', 'createdAt', 'uid']) &&
+             data.patientName is string && data.patientName.size() > 0 && data.patientName.size() <= 150 &&
+             data.patientId is string && data.patientId.size() > 0 && data.patientId.size() <= 100 &&
+             isValidBloodGroup(data.bloodGroup) &&
+             isValidRh(data.rh) &&
+             (data.testDate is string || data.testDate is timestamp) &&
+             data.result in ['Compatible', 'Incompatible', 'Unidad disponible', ''] &&
+             (data.createdAt is string || data.createdAt is timestamp) &&
+             (!('eps' in data) || (data.eps is string && data.eps.size() <= 150)) &&
+             (!('age' in data) || (data.age is string && data.age.size() <= 20)) &&
+             (!('gender' in data) || (data.gender is string && data.gender.size() <= 20)) &&
+             (!('zone' in data) || (data.zone is string && data.zone.size() <= 50)) &&
+             (!('unitId' in data) || (data.unitId is string && data.unitId.size() <= 100)) &&
+             (!('unitGroup' in data) || isValidBloodGroup(data.unitGroup)) &&
+             (!('unitRh' in data) || isValidRh(data.unitRh)) &&
+             (!('unitExpirationDate' in data) || (data.unitExpirationDate is string && data.unitExpirationDate.size() <= 100)) &&
+             (!('irregularAntibodies' in data) || (data.irregularAntibodies is string && data.irregularAntibodies.size() <= 200)) &&
+             (!('autocontrol' in data) || data.autocontrol in ['0', '+', '++', '+++', '++++', 'Unidad disponible', '']) &&
+             (!('temperature' in data) || (data.temperature is string && data.temperature.size() <= 50)) &&
+             (!('provider' in data) || data.provider in ['Hemolife', 'Hemocentro', 'FUHECO', '']) &&
+             (!('requestedHemoderivative' in data) || data.requestedHemoderivative in ['Globulos Rojos', 'Plasma Fresco Congelado', 'Plaquetas', 'Plaquetas (Estándar)', 'Plaquetas AFERESIS', '']) &&
+             (!('requestType' in data) || data.requestType in ['Reserva', 'Transfusion', 'Urgencia Vital', '']) &&
+             (!('qualitySeal' in data) || (data.qualitySeal is string && data.qualitySeal.size() <= 150)) &&
+             (!('bacteriologist' in data) || (data.bacteriologist is string && data.bacteriologist.size() <= 150)) &&
+             (!('registryNumber' in data) || (data.registryNumber is string && data.registryNumber.size() <= 100)) &&
+             (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 150)) &&
+             (!('responsiblePerson' in data) || (data.responsiblePerson is string && data.responsiblePerson.size() <= 150)) &&
+             (!('hemoderivativeUnit' in data) || (data.hemoderivativeUnit is string && data.hemoderivativeUnit.size() <= 150)) &&
+             (!('observations' in data) || (data.observations is string && data.observations.size() <= 2000)) &&
+             (!('updatedAt' in data) || (data.updatedAt is string)) &&
+             (!('updatedBy' in data) || (data.updatedBy is string)) &&
+             (!('acceptedBy' in data) || (data.acceptedBy is string)) &&
+             (!('acceptedAt' in data) || (data.acceptedAt is string)) &&
+             (!('returned' in data) || (data.returned is bool)) &&
+             (!('returnComment' in data) || (data.returnComment is string)) &&
+             (!('returnedAt' in data) || (data.returnedAt is string));
+    }
+
+    // Domain Validator for Received Units
+    function isValidReceivedUnitRecord(data) {
+      return hasRequiredFields(['receptionDate', 'receptionTime', 'provider', 'hemoderivativeType', 'unitId', 'bloodGroup', 'rh', 'expirationDate', 'accepted', 'receiverName', 'supervisorName', 'createdAt', 'uid']) &&
+             (data.receptionDate is string || data.receptionDate is timestamp) && data.receptionDate.size() > 0 && data.receptionDate.size() <= 50 &&
+             data.receptionTime is string && data.receptionTime.size() > 0 && data.receptionTime.size() <= 50 &&
+             data.provider in ['Hemolife', 'Hemocentro', 'FUHECO', ''] &&
+             data.hemoderivativeType in ['Globulos Rojos', 'Plasma Fresco Congelado', 'Plaquetas', 'Plaquetas (Estándar)', 'Plaquetas AFERESIS', 'Crioprecipitado', ''] &&
+             data.unitId is string && data.unitId.size() > 0 && data.unitId.size() <= 100 &&
+             isValidBloodGroup(data.bloodGroup) &&
+             isValidRh(data.rh) &&
+             (data.expirationDate is string || data.expirationDate is timestamp) && data.expirationDate.size() > 0 && data.expirationDate.size() <= 50 &&
+             data.accepted in ['Sí', 'No', ''] &&
+             data.receiverName is string && data.receiverName.size() > 0 && data.receiverName.size() <= 150 &&
+             data.supervisorName is string && data.supervisorName.size() > 0 && data.supervisorName.size() <= 150 &&
+             (data.createdAt is string || data.createdAt is timestamp) &&
+             (!('qualitySeal' in data) || (data.qualitySeal is string && data.qualitySeal.size() <= 100)) &&
+             (!('volume' in data) || (data.volume is string && data.volume.size() <= 50)) &&
+             (!('sampleDate' in data) || (data.sampleDate is string && data.sampleDate.size() <= 50)) &&
+             (!('packagingIntegrity' in data) || data.packagingIntegrity in ['Íntegro', 'Dañado', '']) &&
+             (!('contentAspect' in data) || data.contentAspect in ['Normal', 'Anormal', '']) &&
+             (!('temperature' in data) || (data.temperature is string && data.temperature.size() <= 50)) &&
+             (!('observations' in data) || (data.observations is string && data.observations.size() <= 2000)) &&
+             (!('reclassified' in data) || data.reclassified in ['Sí', 'Novedad', '']) &&
+             (!('reclassifiedBloodGroup' in data) || data.reclassifiedBloodGroup in ['A', 'B', 'AB', 'O', '']) &&
+             (!('reclassifiedRh' in data) || data.reclassifiedRh in ['+', '-', '']) &&
+             (!('reclassifiedComment' in data) || (data.reclassifiedComment is string && data.reclassifiedComment.size() <= 1000)) &&
+             (!('rejectionReason' in data) || (data.rejectionReason is string && data.rejectionReason.size() <= 500)) &&
+             (!('actionsTaken' in data) || (data.actionsTaken is string && data.actionsTaken.size() <= 500)) &&
+             (!('reporterName' in data) || (data.reporterName is string && data.reporterName.size() <= 150)) &&
+             (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 150)) &&
+             (!('updatedAt' in data) || (data.updatedAt is string)) &&
+             (!('updatedBy' in data) || (data.updatedBy is string));
+    }
+
+    // Domain Validator for Transfusion Use
+    function isValidTransfusionUseRecord(data) {
+      return hasRequiredFields(['service', 'patientId', 'patientName', 'unitId', 'qualitySeal', 'transfusionDate', 'transfusionTime', 'createdAt', 'uid']) &&
+             data['service'] is string && data['service'].size() <= 100 &&
+             data.patientId is string && data.patientId.size() > 0 && data.patientId.size() <= 100 &&
+             data.patientName is string && data.patientName.size() > 0 && data.patientName.size() <= 150 &&
+             data.unitId is string && data.unitId.size() > 0 && data.unitId.size() <= 100 &&
+             data.qualitySeal is string && data.qualitySeal.size() > 0 && data.qualitySeal.size() <= 150 &&
+             (data.transfusionDate is string || data.transfusionDate is timestamp) && data.transfusionDate.size() > 0 && data.transfusionDate.size() <= 50 &&
+             data.transfusionTime is string && data.transfusionTime.size() > 0 && data.transfusionTime.size() <= 50 &&
+             (data.createdAt is string || data.createdAt is timestamp) &&
+             (!('age' in data) || (data.age is string && data.age.size() <= 20)) &&
+             (!('gender' in data) || (data.gender is string && data.gender.size() <= 20)) &&
+             (!('hemoderivativeType' in data) || (data.hemoderivativeType is string && data.hemoderivativeType.size() <= 100)) &&
+             (!('bloodGroup' in data) || (data.bloodGroup is string && data.bloodGroup.size() <= 10)) &&
+             (!('rh' in data) || (data.rh is string && data.rh.size() <= 10)) &&
+             (!('orderDate' in data) || (data.orderDate is string && data.orderDate.size() <= 50)) &&
+             (!('orderTime' in data) || (data.orderTime is string && data.orderTime.size() <= 50)) &&
+             (!('opportunity' in data) || (data.opportunity is string && data.opportunity.size() <= 100)) &&
+             (!('prescriptionFormat' in data) || data.prescriptionFormat in ['Sí', 'No', '']) &&
+             (!('informedConsent' in data) || data.informedConsent in ['Sí', 'No', '']) &&
+             (!('adminChecklist' in data) || data.adminChecklist in ['Sí', 'No', '']) &&
+             (!('nursingNote' in data) || data.nursingNote in ['Sí', 'No', '']) &&
+             (!('adverseReaction' in data) || data.adverseReaction in ['Sí', 'No', '']) &&
+             (!('safetyEvent' in data) || (data.safetyEvent is string && data.safetyEvent.size() <= 1000)) &&
+             (!('reactionDescription' in data) || (data.reactionDescription is string && data.reactionDescription.size() <= 1000)) &&
+             (!('responsibleDoctor' in data) || (data.responsibleDoctor is string && data.responsibleDoctor.size() <= 150)) &&
+             (!('responsibleNurse' in data) || (data.responsibleNurse is string && data.responsibleNurse.size() <= 150)) &&
+             (!('observations' in data) || (data.observations is string && data.observations.size() <= 2000)) &&
+             (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 150)) &&
+             (!('preVitalSigns' in data) || data.preVitalSigns is map) &&
+             (!('duringVitalSigns' in data) || data.duringVitalSigns is map) &&
+             (!('postVitalSigns' in data) || data.postVitalSigns is map) &&
+             (!('updatedAt' in data) || (data.updatedAt is string)) &&
+             (!('updatedBy' in data) || (data.updatedBy is string));
+    }
+
+    // Domain Validator for Final Disposition
+    function isValidFinalDispositionRecord(data) {
+      return hasRequiredFields(['unitId', 'dispositionDate', 'dispositionType', 'responsiblePerson', 'createdAt', 'uid']) &&
+             data.unitId is string && data.unitId.size() > 0 && data.unitId.size() <= 100 &&
+             (data.dispositionDate is string || data.dispositionDate is timestamp) && data.dispositionDate.size() > 0 && data.dispositionDate.size() <= 50 &&
+             data.dispositionType in ['Transfundido', 'Descarte', 'Traslado', ''] &&
+             data.responsiblePerson is string && data.responsiblePerson.size() > 0 && data.responsiblePerson.size() <= 150 &&
+             (data.createdAt is string || data.createdAt is timestamp) &&
+             (!('qualitySeal' in data) || (data.qualitySeal is string && data.qualitySeal.size() <= 100)) &&
+             (!('reason' in data) || (data.reason is string && data.reason.size() <= 500)) &&
+             (!('observations' in data) || (data.observations is string && data.observations.size() <= 2000)) &&
+             (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 150)) &&
+             (!('updatedAt' in data) || (data.updatedAt is string)) &&
+             (!('updatedBy' in data) || (data.updatedBy is string));
+    }
+
+    // Domain Validator for Lab Results
+    function isValidLabResultRecord(data) {
+      return hasRequiredFields(['date', 'patientName', 'studyType', 'uid']) &&
+             (data.date is string || data.date is timestamp) &&
+             data.patientName is string && data.patientName.size() > 0 && data.patientName.size() <= 200 &&
+             data.studyType is string && data.studyType.size() > 0 && data.studyType.size() <= 200 &&
+             (!('clinicalHistoryNumber' in data) || (data.clinicalHistoryNumber is string && data.clinicalHistoryNumber.size() <= 100)) &&
+             (!('age' in data) || (data.age is string && data.age.size() <= 50)) &&
+             (!('eps' in data) || (data.eps is string && data.eps.size() <= 150)) &&
+             (!('parameters' in data) || data.parameters is list) &&
+             (!('generalAnalysis' in data) || data.generalAnalysis is string) &&
+             (!('sourceImage' in data) || data.sourceImage is string) &&
+             (!('sourceMimeType' in data) || data.sourceMimeType is string) &&
+             (!('calibrationCurve' in data) || data.calibrationCurve is map) &&
+             (!('graphs' in data) || data.graphs is list) &&
+             (!('validationWarning' in data) || data.validationWarning is string) &&
+             (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 150)) &&
+             (!('updatedAt' in data) || (data.updatedAt is string || data.updatedAt is timestamp)) &&
+             (!('updatedBy' in data) || (data.updatedBy is string));
+    }
+
+    // Domain Validator for Supplies
+    function isValidSupply(data) {
+      return hasRequiredFields(['name', 'currentStock', 'unit']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.currentStock is number &&
+             data.unit is string && data.unit.size() > 0 && data.unit.size() <= 50 &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 1000)) &&
+             (!('category' in data) || (data.category is string && data.category.size() <= 100)) &&
+             (!('minStock' in data) || data.minStock is number) &&
+             (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 150)) &&
+             (!('uid' in data) || (data.uid is string)) &&
+             (!('createdAt' in data) || (data.createdAt is string || data.createdAt is timestamp));
+    }
+
+    // Domain Validator for Kardex Entries
+    function isValidKardexEntry(data) {
+      return hasRequiredFields(['supplyId', 'date', 'type', 'quantity', 'balance', 'responsible']) &&
+             data.supplyId is string &&
+             (data.date is string || data.date is timestamp) &&
+             data.type in ['input', 'output', 'action'] &&
+             data.quantity is number &&
+             data.balance is number &&
+             data.responsible is string && data.responsible.size() > 0 && data.responsible.size() <= 150 &&
+             (!('supplyName' in data) || (data.supplyName is string)) &&
+             (!('supplyCategory' in data) || (data.supplyCategory is string)) &&
+             (!('observations' in data) || (data.observations is string && data.observations.size() <= 2000)) &&
+             (!('batch' in data) || (data.batch is string && data.batch.size() <= 100)) &&
+             (!('expirationDate' in data) || (data.expirationDate is string && data.expirationDate.size() <= 100)) &&
+             (!('userEmail' in data) || (data.userEmail is string && data.userEmail.size() <= 150)) &&
+             (!('actionType' in data) || (data.actionType is string && data.actionType.size() <= 100)) &&
+             (!('invimaRecord' in data) || (data.invimaRecord is string && data.invimaRecord.size() <= 100)) &&
+             (!('uid' in data) || (data.uid is string)) &&
+             (!('createdAt' in data) || (data.createdAt is string || data.createdAt is timestamp));
+    }
+
+    // Domain Validator for User Profiles
+    function isValidUserProfile(data) {
+      return hasRequiredFields(['uid', 'email', 'lastLogin']) &&
+             data.uid is string && data.uid.size() > 0 &&
+             data.email is string && data.email.size() > 0 &&
+             data.lastLogin is string;
+    }
+
+    // Domain Validator for Patient Checks
+    function isValidPatientCheck(data) {
+      return hasRequiredFields(['reporteSIHEVI', 'labsMultitransfundidos', 'updatedAt', 'updatedBy']) &&
+             data.reporteSIHEVI is bool &&
+             data.labsMultitransfundidos is bool &&
+             data.updatedAt is string &&
+             data.updatedBy is string;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /test/connection {
+      allow read: if true;
+    }
+
+    match /users/{userId} {
+      allow read: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow write: if isAdmin();
+    }
+
+    match /user_profiles/{userId} {
+      allow read: if isAdmin() || isOwner(userId);
+      allow create, update: if (isOwner(userId) || isAdmin()) && isValidUserProfile(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /labResults/{recordId} {
+      allow read: if hasSectionPermission('laboratorio', 'consultar');
+      allow create: if hasSectionPermission('laboratorio', 'crear') && isValidLabResultRecord(request.resource.data) && request.resource.data.uid == request.auth.uid;
+      allow update: if (hasSectionPermission('laboratorio', 'crear') || isAdmin()) && isValidLabResultRecord(request.resource.data) && uidNotModified();
+      allow delete: if isAdmin();
+    }
+
+    match /bloodTestRecords/{recordId} {
+      allow read: if hasHemoPermission('preTransfusional', 'consultar');
+      allow create: if hasHemoPermission('preTransfusional', 'crear') && isValidBloodTestRecord(request.resource.data) && request.resource.data.uid == request.auth.uid;
+      allow update: if (
+          (hasHemoPermission('preTransfusional', 'editar') && uidNotModified()) ||
+          (hasHemoPermission('preTransfusional', 'aceptar') && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['acceptedBy', 'acceptedAt'])) ||
+          (hasHemoPermission('preTransfusional', 'devolver') && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['returned', 'returnComment', 'returnedAt'])) ||
+          isAdmin()
+        ) && isValidBloodTestRecord(request.resource.data);
+      allow delete: if hasHemoPermission('preTransfusional', 'eliminar') || isAdmin();
+    }
+
+    match /receivedUnits/{recordId} {
+      allow read: if hasHemoPermission('recepcion', 'consultar');
+      allow create: if hasHemoPermission('recepcion', 'crear') && isValidReceivedUnitRecord(request.resource.data) && request.resource.data.uid == request.auth.uid;
+      allow update: if (hasHemoPermission('recepcion', 'editar') || isAdmin()) && isValidReceivedUnitRecord(request.resource.data) && uidNotModified();
+      allow delete: if hasHemoPermission('recepcion', 'eliminar') || isAdmin();
+    }
+
+    match /transfusionUse/{recordId} {
+      allow read: if hasHemoPermission('uso', 'consultar');
+      allow create: if hasHemoPermission('uso', 'crear') && isValidTransfusionUseRecord(request.resource.data) && request.resource.data.uid == request.auth.uid;
+      allow update: if (hasHemoPermission('uso', 'editar') || isAdmin()) && isValidTransfusionUseRecord(request.resource.data) && uidNotModified();
+      allow delete: if hasHemoPermission('uso', 'eliminar') || isAdmin();
+    }
+
+    match /usoPatientChecks/{patientId} {
+      allow read: if hasHemoPermission('uso', 'consultar');
+      allow create, update: if (hasHemoPermission('uso', 'crear') || hasHemoPermission('uso', 'editar') || isAdmin()) && isValidPatientCheck(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /finalDisposition/{recordId} {
+      allow read: if hasHemoPermission('disposicion', 'consultar');
+      allow create: if hasHemoPermission('disposicion', 'crear') && isValidFinalDispositionRecord(request.resource.data) && request.resource.data.uid == request.auth.uid;
+      allow update: if (hasHemoPermission('disposicion', 'editar') || isAdmin()) && isValidFinalDispositionRecord(request.resource.data) && uidNotModified();
+      allow delete: if hasHemoPermission('disposicion', 'eliminar') || isAdmin();
+    }
+
+    match /supplies/{supplyId} {
+      allow read: if hasSectionPermission('insumos', 'consultar');
+      allow create: if hasSectionPermission('insumos', 'crear') && isValidSupply(request.resource.data) && (request.resource.data.uid == request.auth.uid || request.resource.data.uid == 'system' || isAdmin());
+      allow update: if (hasSectionPermission('insumos', 'consumir') || isAdmin() || resource.data.uid == 'system') && isValidSupply(request.resource.data) && (uidNotModified() || resource.data.uid == 'system');
+      allow delete: if hasSectionPermission('insumos', 'eliminar') || isAdmin();
+    }
+
+    match /kardexEntries/{entryId} {
+      allow read: if hasSectionPermission('insumos', 'consultar');
+      allow create: if (hasSectionPermission('insumos', 'crear') || hasSectionPermission('insumos', 'consumir')) && isValidKardexEntry(request.resource.data) && (request.resource.data.uid == request.auth.uid || request.resource.data.uid == 'system');
+      allow update: if (hasSectionPermission('insumos', 'consumir') || isAdmin() || resource.data.uid == 'system') && isValidKardexEntry(request.resource.data) && (uidNotModified() || resource.data.uid == 'system');
+      allow delete: if hasSectionPermission('insumos', 'eliminar') || isAdmin();
+    }
+
+    match /app_settings/{documentId} {
+      allow read, write: if isSuperAdmin();
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

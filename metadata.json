@@ -1,0 +1,8 @@
+{
+  "name": "Gestión de laboratorio",
+  "description": "Sistema para el registro y seguimiento de pruebas laboratorio en UCI Honda, con historial y exportación a PDF.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

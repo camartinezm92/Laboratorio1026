@@ -1,0 +1,327 @@
+{
+  "entities": {
+    "BloodTestRecord": {
+      "title": "Blood Test Record",
+      "description": "A record of a blood cross-match test for a patient.",
+      "type": "object",
+      "properties": {
+        "patientName": { "type": "string" },
+        "patientId": { "type": "string" },
+        "eps": { "type": "string" },
+        "age": { "type": "string" },
+        "gender": { "type": "string" },
+        "zone": { "type": "string" },
+        "bloodGroup": { "type": "string", "enum": ["A", "B", "AB", "O", ""] },
+        "rh": { "type": "string", "enum": ["+", "-", ""] },
+        "testDate": { "type": "string", "format": "date" },
+        "result": { "type": "string", "enum": ["Compatible", "Incompatible", ""] },
+        "unitId": { "type": "string" },
+        "unitGroup": { "type": "string", "enum": ["A", "B", "AB", "O", ""] },
+        "unitRh": { "type": "string", "enum": ["+", "-", ""] },
+        "unitExpirationDate": { "type": "string" },
+        "irregularAntibodies": { "type": "string" },
+        "autocontrol": { "type": "string", "enum": ["0", "+", "++", "+++", "++++", ""] },
+        "temperature": { "type": "string" },
+        "provider": { "type": "string", "enum": ["Hemolife", "Hemocentro", "Fueco", ""] },
+        "requestedHemoderivative": { "type": "string", "enum": ["Globulos Rojos", "Plasma Fresco Congelado", "Plaquetas", ""] },
+        "requestType": { "type": "string", "enum": ["Reserva", "Transfusion", "Urgencia Vital", ""] },
+        "qualitySeal": { "type": "string" },
+        "bacteriologist": { "type": "string" },
+        "registryNumber": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "observations": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "uid": { "type": "string" }
+      },
+      "required": ["patientName", "patientId", "bloodGroup", "rh", "testDate", "result", "createdAt", "uid"]
+    },
+    "ReceivedUnitRecord": {
+      "title": "Received Unit Record",
+      "description": "A record of a blood unit received from a provider.",
+      "type": "object",
+      "properties": {
+        "receptionDate": { "type": "string" },
+        "receptionTime": { "type": "string" },
+        "provider": { "type": "string", "enum": ["Hemolife", "Hemocentro", "FUHECO", ""] },
+        "hemoderivativeType": { "type": "string", "enum": ["Globulos Rojos", "Plasma Fresco Congelado", "Plaquetas (Estándar)", "Plaquetas AFERESIS", "Crioprecipitado", ""] },
+        "unitId": { "type": "string" },
+        "qualitySeal": { "type": "string" },
+        "bloodGroup": { "type": "string", "enum": ["A", "B", "AB", "O", ""] },
+        "rh": { "type": "string", "enum": ["+", "-", ""] },
+        "volume": { "type": "string" },
+        "sampleDate": { "type": "string" },
+        "expirationDate": { "type": "string" },
+        "packagingIntegrity": { "type": "string", "enum": ["Íntegro", "Dañado", ""] },
+        "contentAspect": { "type": "string", "enum": ["Normal", "Anormal", ""] },
+        "temperature": { "type": "string" },
+        "observations": { "type": "string" },
+        "accepted": { "type": "string", "enum": ["Sí", "No", ""] },
+        "receiverName": { "type": "string" },
+        "supervisorName": { "type": "string" },
+        "reclassified": { "type": "string", "enum": ["Sí", "Novedad", ""] },
+        "reclassifiedBloodGroup": { "type": "string", "enum": ["A", "B", "AB", "O", ""] },
+        "reclassifiedRh": { "type": "string", "enum": ["+", "-", ""] },
+        "reclassifiedComment": { "type": "string" },
+        "rejectionReason": { "type": "string" },
+        "actionsTaken": { "type": "string" },
+        "reporterName": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "uid": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["receptionDate", "receptionTime", "provider", "hemoderivativeType", "unitId", "bloodGroup", "rh", "expirationDate", "accepted", "receiverName", "supervisorName", "createdAt", "uid"]
+    },
+    "TransfusionUseRecord": {
+      "title": "Transfusion Use Record",
+      "description": "A record of a blood unit being used for a transfusion.",
+      "type": "object",
+      "properties": {
+        "service": { "type": "string" },
+        "patientName": { "type": "string" },
+        "patientId": { "type": "string" },
+        "age": { "type": "string" },
+        "gender": { "type": "string" },
+        "hemoderivativeType": { "type": "string" },
+        "bloodGroup": { "type": "string" },
+        "rh": { "type": "string" },
+        "orderDate": { "type": "string" },
+        "orderTime": { "type": "string" },
+        "transfusionDate": { "type": "string" },
+        "transfusionTime": { "type": "string" },
+        "opportunity": { "type": "string" },
+        "qualitySeal": { "type": "string" },
+        "unitId": { "type": "string" },
+        "prescriptionFormat": { "type": "string", "enum": ["Sí", "No", ""] },
+        "informedConsent": { "type": "string", "enum": ["Sí", "No", ""] },
+        "adminChecklist": { "type": "string", "enum": ["Sí", "No", ""] },
+        "nursingNote": { "type": "string", "enum": ["Sí", "No", ""] },
+        "adverseReaction": { "type": "string", "enum": ["Sí", "No", ""] },
+        "safetyEvent": { "type": "string" },
+        "reactionDescription": { "type": "string" },
+        "observations": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "uid": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["service", "patientId", "patientName", "unitId", "qualitySeal", "transfusionDate", "transfusionTime", "createdAt", "uid"]
+    },
+    "FinalDispositionRecord": {
+      "title": "Final Disposition Record",
+      "description": "A record of the final disposition of a blood unit.",
+      "type": "object",
+      "properties": {
+        "unitId": { "type": "string" },
+        "qualitySeal": { "type": "string" },
+        "dispositionDate": { "type": "string" },
+        "dispositionType": { "type": "string", "enum": ["Transfundido", "Descarte", "Traslado", ""] },
+        "reason": { "type": "string" },
+        "responsiblePerson": { "type": "string" },
+        "observations": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "uid": { "type": "string" }
+      },
+      "required": ["unitId", "dispositionDate", "dispositionType", "responsiblePerson", "createdAt", "uid"]
+    },
+    "AppSetting": {
+      "title": "App Setting",
+      "description": "System-wide settings, including Google Drive tokens.",
+      "type": "object",
+      "properties": {
+        "access_token": { "type": "string" },
+        "refresh_token": { "type": "string" },
+        "scope": { "type": "string" },
+        "token_type": { "type": "string" },
+        "expiry_date": { "type": "number" }
+      }
+    },
+    "LabResultRecord": {
+      "title": "Lab Result Record",
+      "description": "A record of a laboratory analysis result.",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date-time" },
+        "patientName": { "type": "string" },
+        "clinicalHistoryNumber": { "type": "string" },
+        "age": { "type": "string" },
+        "eps": { "type": "string" },
+        "studyType": { "type": "string" },
+        "parameters": { "type": "array" },
+        "generalAnalysis": { "type": "string" },
+        "sourceImage": { "type": "string" },
+        "sourceMimeType": { "type": "string" },
+        "calibrationCurve": { "type": "object" },
+        "graphs": { "type": "array" },
+        "validationWarning": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "uid": { "type": "string" }
+      },
+      "required": ["date", "patientName", "studyType", "uid"]
+    },
+    "Supply": {
+      "title": "Supply",
+      "description": "A supply item in the inventory.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "currentStock": { "type": "number" },
+        "unit": { "type": "string" },
+        "minStock": { "type": "number" },
+        "userEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "uid": { "type": "string" }
+      },
+      "required": ["name", "currentStock", "unit", "createdAt", "uid"]
+    },
+    "KardexEntry": {
+      "title": "Kardex Entry",
+      "description": "A movement record in the inventory ledger.",
+      "type": "object",
+      "properties": {
+        "supplyId": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "type": { "type": "string", "enum": ["input", "output"] },
+        "quantity": { "type": "number" },
+        "balance": { "type": "number" },
+        "responsible": { "type": "string" },
+        "observations": { "type": "string" },
+        "batch": { "type": "string" },
+        "expirationDate": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "uid": { "type": "string" }
+      },
+      "required": ["supplyId", "date", "type", "quantity", "balance", "responsible", "createdAt", "uid"]
+    },
+    "User": {
+      "title": "User",
+      "description": "A user of the system with specific permissions.",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "active": { "type": "boolean" },
+        "permissions": {
+          "type": "object",
+          "properties": {
+            "recepcion": {
+              "type": "object",
+              "properties": {
+                "crear": { "type": "boolean" },
+                "consultar": { "type": "boolean" },
+                "editar": { "type": "boolean" },
+                "eliminar": { "type": "boolean" }
+              }
+            },
+            "preTransfusional": {
+              "type": "object",
+              "properties": {
+                "crear": { "type": "boolean" },
+                "consultar": { "type": "boolean" },
+                "editar": { "type": "boolean" },
+                "eliminar": { "type": "boolean" }
+              }
+            },
+            "uso": {
+              "type": "object",
+              "properties": {
+                "crear": { "type": "boolean" },
+                "consultar": { "type": "boolean" },
+                "editar": { "type": "boolean" },
+                "eliminar": { "type": "boolean" }
+              }
+            },
+            "disposicion": {
+              "type": "object",
+              "properties": {
+                "crear": { "type": "boolean" },
+                "consultar": { "type": "boolean" },
+                "editar": { "type": "boolean" },
+                "eliminar": { "type": "boolean" }
+              }
+            },
+            "laboratorio": {
+              "type": "object",
+              "properties": {
+                "crear": { "type": "boolean" },
+                "consultar": { "type": "boolean" }
+              }
+            },
+            "insumos": {
+              "type": "object",
+              "properties": {
+                "crear": { "type": "boolean" },
+                "consultar": { "type": "boolean" },
+                "consumir": { "type": "boolean" },
+                "eliminar": { "type": "boolean" }
+              }
+            }
+          }
+        }
+      },
+      "required": ["username", "password", "email", "role", "active"]
+    },
+    "PatientCheck": {
+      "title": "Patient Check",
+      "description": "Checks performed on multitransfused patients.",
+      "type": "object",
+      "properties": {
+        "reporteSIHEVI": { "type": "boolean" },
+        "labsMultitransfundidos": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["reporteSIHEVI", "labsMultitransfundidos", "updatedAt", "updatedBy"]
+    }
+  },
+  "firestore": {
+    "bloodTestRecords": {
+      "schema": "BloodTestRecord",
+      "description": "Collection of blood cross-match test records."
+    },
+    "receivedUnits": {
+      "schema": "ReceivedUnitRecord",
+      "description": "Collection of received blood unit records."
+    },
+    "transfusionUse": {
+      "schema": "TransfusionUseRecord",
+      "description": "Collection of transfusion use records."
+    },
+    "finalDisposition": {
+      "schema": "FinalDispositionRecord",
+      "description": "Collection of final disposition records."
+    },
+    "app_settings": {
+      "schema": "AppSetting",
+      "description": "System-wide settings collection."
+    },
+    "labResults": {
+      "schema": "LabResultRecord",
+      "description": "Collection of laboratory analysis results."
+    },
+    "supplies": {
+      "schema": "Supply",
+      "description": "Collection of supply items."
+    },
+    "kardexEntries": {
+      "schema": "KardexEntry",
+      "description": "Collection of inventory movement records."
+    },
+    "users": {
+      "schema": "User",
+      "description": "Collection of authorized users and their permissions."
+    },
+    "usoPatientChecks": {
+      "schema": "PatientCheck",
+      "description": "Collection of checks for multitransfused patients."
+    }
+  }
+}
