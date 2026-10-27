@@ -154,7 +154,7 @@ export const PreTransfusionalApp: React.FC = () => {
 
     if (
       (normalizedUsername === 'lvaleriano' && password === 'LAB2026*') ||
-      (normalizedUsername === 'admin' && password === 'admin') ||
+      (normalizedUsername === 'admin' && (password === 'admin' || password === 'admin2026*' || password === 'admin2026')) ||
       isSuperAdminEmail
     ) {
       setIsSystemUnlocked(true);

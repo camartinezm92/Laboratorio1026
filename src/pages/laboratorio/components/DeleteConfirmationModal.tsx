@@ -25,24 +25,55 @@ export const DeleteConfirmationModal: React.FC<Props> = ({
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
-  const handleConfirm = (e: React.FormEvent) => {
+  const handleConfirm = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
     const normalizedUsername = username.trim().toLowerCase();
-    if (normalizedUsername === expectedUsername.toLowerCase() && password === expectedPassword) {
+    const cleanPassword = password.trim();
+
+    // Credenciales esperadas del módulo
+    const isExpected = normalizedUsername === expectedUsername.toLowerCase() && cleanPassword === expectedPassword.trim();
+    // Credenciales de administrador maestro (soporta admin2026*, admin, y variantes)
+    const isAdmin = normalizedUsername === 'admin' && (cleanPassword === 'admin2026*' || cleanPassword === 'admin' || cleanPassword === 'admin2026');
+    // Credenciales de laboratorio
+    const isLab = normalizedUsername === 'laboratorio' && (cleanPassword === 'laboratorio2026*' || cleanPassword === 'laboratorio');
+
+    if (isExpected || isAdmin || isLab) {
       onConfirm();
       setUsername('');
       setPassword('');
       onClose();
-    } else if (normalizedUsername === 'admin' && password === 'admin') {
-      onConfirm();
-      setUsername('');
-      setPassword('');
-      onClose();
-    } else {
-      setError('Usuario o contraseña incorrectos.');
+      return;
     }
+
+    // Validación secundaria contra el sistema de usuarios (si es un usuario admin en base de datos)
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: username.trim(), password: cleanPassword })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        if (data.user && data.user.active) {
+          const isRoleAdmin = data.user.role === 'admin';
+          const perms = data.user.permissions || {};
+          const canDelete = isRoleAdmin || perms.eliminar || perms.laboratorio?.eliminar || perms.hemoderivados?.eliminar;
+          if (canDelete || isRoleAdmin) {
+            onConfirm();
+            setUsername('');
+            setPassword('');
+            onClose();
+            return;
+          }
+        }
+      }
+    } catch {
+      // Ignorar fallo de red y continuar a error de credenciales
+    }
+
+    setError('Usuario o contraseña incorrectos.');
   };
 
   return (

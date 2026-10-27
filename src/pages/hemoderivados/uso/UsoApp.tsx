@@ -194,7 +194,7 @@ export const UsoApp: React.FC = () => {
 
     if (
       (normalizedUsername === 'usohemo' && password === 'Usohemo2026*') ||
-      (normalizedUsername === 'admin' && password === 'admin') ||
+      (normalizedUsername === 'admin' && (password === 'admin' || password === 'admin2026*' || password === 'admin2026')) ||
       isSuperAdminEmail
     ) {
       setIsSystemUnlocked(true);
