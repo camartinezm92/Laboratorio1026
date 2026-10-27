@@ -9,7 +9,7 @@ import { auth, db, loginWithGoogle, logout, handleFirestoreError, OperationType 
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, onSnapshot, query, orderBy, where, getDocs, doc, deleteDoc, setDoc } from 'firebase/firestore';
 import { DeleteConfirmationModal } from '../../laboratorio/components/DeleteConfirmationModal';
-import { saveRecord as apiSaveRecord, deleteRecord as apiDeleteRecord } from '../../../lib/api';
+import { saveRecord as apiSaveRecord, deleteRecord as apiDeleteRecord, getRecords } from '../../../lib/api';
 import { getNowISO } from '../../../utils/dateUtils';
 
 interface PatientCheck {
@@ -165,8 +165,22 @@ export const UsoApp: React.FC = () => {
         recordsData.push({ id: doc.id, ...doc.data() } as TransfusionUseRecord);
       });
       setRecords(recordsData);
-    }, (error) => {
+      try {
+        localStorage.setItem(`cached_${path}`, JSON.stringify(recordsData));
+      } catch {}
+    }, async (error) => {
       handleFirestoreError(error, OperationType.LIST, path);
+      try {
+        const fallback = await getRecords(path);
+        if (fallback && fallback.length > 0) {
+          setRecords(fallback);
+        } else {
+          const cached = localStorage.getItem(`cached_${path}`);
+          if (cached) setRecords(JSON.parse(cached));
+        }
+      } catch (err) {
+        console.warn('Error al cargar datos locales de uso:', err);
+      }
     });
 
     // Listen for patient checks

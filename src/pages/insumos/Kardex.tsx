@@ -40,6 +40,7 @@ import {
 import { db, auth, handleFirestoreError, OperationType } from '../../firebase';
 import { ExcelExportButton } from '../../components/ExcelExportButton';
 import { getNowISO, getColombiaDateString, formatColombia } from '../../utils/dateUtils';
+import { getRecords } from '../../lib/api';
 
 // Types
 interface Supply {
@@ -164,7 +165,21 @@ export const Kardex: React.FC = () => {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Supply));
       setSupplies(data);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'supplies'));
+      try {
+        localStorage.setItem('cached_supplies', JSON.stringify(data));
+      } catch {}
+    }, async (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'supplies');
+      try {
+        const fallback = await getRecords('supplies');
+        if (fallback && fallback.length > 0) {
+          setSupplies(fallback);
+        } else {
+          const cached = localStorage.getItem('cached_supplies');
+          if (cached) setSupplies(JSON.parse(cached));
+        }
+      } catch {}
+    });
 
     return () => unsubscribe();
   }, []);
@@ -175,7 +190,21 @@ export const Kardex: React.FC = () => {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as KardexEntry));
       setAllEntries(data);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'kardexEntries'));
+      try {
+        localStorage.setItem('cached_kardexEntries', JSON.stringify(data));
+      } catch {}
+    }, async (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'kardexEntries');
+      try {
+        const fallback = await getRecords('kardexEntries');
+        if (fallback && fallback.length > 0) {
+          setAllEntries(fallback);
+        } else {
+          const cached = localStorage.getItem('cached_kardexEntries');
+          if (cached) setAllEntries(JSON.parse(cached));
+        }
+      } catch {}
+    });
 
     return () => unsubscribe();
   }, []);

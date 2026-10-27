@@ -94,7 +94,7 @@ export async function extractLabDocument(
   const MAX_ATTEMPTS = 3;
   let response: Response;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 50000); // 50s client timeout
+  const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s client timeout
 
   try {
     response = await fetch('/api/gemini/extract-lab', {
@@ -115,7 +115,7 @@ export async function extractLabDocument(
       return extractLabDocument(base64Data, mimeType, attempt + 1);
     }
     throw new Error(isTimeout 
-      ? 'El servidor tardó demasiado en responder (>50s). Puedes intentar nuevamente este archivo.' 
+      ? 'El servidor tardó demasiado en responder (>90s). Puedes intentar nuevamente este archivo.' 
       : `Error de conexión con el servidor: ${networkErr.message || 'Fallo de red'}`);
   } finally {
     clearTimeout(timeoutId);

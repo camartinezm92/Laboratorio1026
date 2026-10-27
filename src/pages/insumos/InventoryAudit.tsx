@@ -19,6 +19,7 @@ import {
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../../firebase';
 import { formatColombia } from '../../utils/dateUtils';
+import { getRecords } from '../../lib/api';
 
 interface KardexEntry {
   id: string;
@@ -50,7 +51,21 @@ export const InventoryAudit: React.FC = () => {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as KardexEntry));
       setEntries(data);
-    }, (error) => handleFirestoreError(error, OperationType.LIST, 'kardexEntries'));
+      try {
+        localStorage.setItem('cached_kardexEntries_audit', JSON.stringify(data));
+      } catch {}
+    }, async (error) => {
+      handleFirestoreError(error, OperationType.LIST, 'kardexEntries');
+      try {
+        const fallback = await getRecords('kardexEntries');
+        if (fallback && fallback.length > 0) {
+          setEntries(fallback);
+        } else {
+          const cached = localStorage.getItem('cached_kardexEntries_audit');
+          if (cached) setEntries(JSON.parse(cached));
+        }
+      } catch {}
+    });
 
     return () => unsubscribe();
   }, []);

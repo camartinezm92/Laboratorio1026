@@ -29,6 +29,21 @@ export const loginWithUsernameAndPassword = async (username: string, password: s
   }
 
   const data = await response.json();
+  if (data.user) {
+    try {
+      localStorage.setItem('auth_user_data', JSON.stringify(data.user));
+      localStorage.setItem(`cached_user_${data.user.id || username}`, JSON.stringify(data.user));
+      if (data.user.permissions) {
+        localStorage.setItem(`cached_permissions_${data.user.id || username}`, JSON.stringify(data.user.permissions));
+      }
+      if (data.user.role) {
+        localStorage.setItem(`cached_role_${data.user.id || username}`, data.user.role);
+      }
+    } catch {
+      // LocalStorage non-critical
+    }
+  }
+
   if (data.firebaseEmail) {
     try {
       // Authenticate the user client-side with standard email and password credentials.
@@ -36,7 +51,7 @@ export const loginWithUsernameAndPassword = async (username: string, password: s
       const userCredential = await signInWithEmailAndPassword(auth, data.firebaseEmail, password);
       return userCredential.user;
     } catch (authErr: any) {
-      console.error('Firebase Client Auth Error during login:', authErr);
+      console.warn('Firebase Client Auth warning during login (using server auth):', authErr?.message || authErr);
       const errMsg = authErr?.message || String(authErr);
       
       // Check if the error indicates Identity Toolkit is disabled in GCP
@@ -47,13 +62,20 @@ export const loginWithUsernameAndPassword = async (username: string, password: s
         errMsg.includes('auth/internal-error') ||
         errMsg.includes('PERMISSION_DENIED')
       ) {
-        throw new Error(
-          'El servicio de Autenticación de Firebase (Identity Toolkit API) no está habilitado en su proyecto de Google Cloud. ' +
-          'Para habilitarlo, por favor visite el siguiente enlace e inténtelo de nuevo:\n\n' +
-          'Consola Google Cloud (Proyecto: 93016382103):\n' +
-          'https://console.developers.google.com/apis/api/identitytoolkit.googleapis.com/overview?project=93016382103\n\n' +
-          'O active "Email/Password" en la consola de Firebase Authentication de su proyecto.'
-        );
+        // Return synthetic session user if client auth toolkit is off
+        return {
+          uid: data.user?.id || username,
+          email: data.firebaseEmail,
+          displayName: data.user?.username || username
+        } as any;
+      }
+      // If client auth throws quota or network error, still allow login with server-verified credentials
+      if (isQuotaExceededError(authErr)) {
+        return {
+          uid: data.user?.id || username,
+          email: data.firebaseEmail,
+          displayName: data.user?.username || username
+        } as any;
       }
       throw authErr;
     }
@@ -70,6 +92,18 @@ export enum OperationType {
   LIST = 'list',
   GET = 'get',
   WRITE = 'write',
+}
+
+export function isQuotaExceededError(error: unknown): boolean {
+  if (!error) return false;
+  const msg = error instanceof Error ? error.message : typeof error === 'string' ? error : JSON.stringify(error);
+  return (
+    msg.includes('Quota limit exceeded') ||
+    msg.includes('RESOURCE_EXHAUSTED') ||
+    msg.includes('Free daily read units') ||
+    msg.includes('quota metric') ||
+    msg.includes('resource-exhausted')
+  );
 }
 
 export interface FirestoreErrorInfo {
@@ -92,6 +126,11 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  if (isQuotaExceededError(error)) {
+    console.warn(`[Firestore Quota] Límite de lectura/escritura alcanzado en base de datos gratuita para ${path || 'colección'}. Operando en modo local/caché.`);
+    return;
+  }
+
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
@@ -109,19 +148,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     },
     operationType,
     path
-  }
+  };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
 }
-
-// Test connection
-async function testConnection() {
-  try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
-  } catch (error) {
-    if(error instanceof Error && error.message.includes('the client is offline')) {
-      console.error("Please check your Firebase configuration. ");
-    }
-  }
-}
-testConnection();

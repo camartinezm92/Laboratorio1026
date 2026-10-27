@@ -9,7 +9,7 @@ import { auth, db, loginWithGoogle, logout, handleFirestoreError, OperationType 
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, onSnapshot, query, orderBy, where, getDocs, doc, deleteDoc } from 'firebase/firestore';
 import { DeleteConfirmationModal } from '../../laboratorio/components/DeleteConfirmationModal';
-import { saveRecord, deleteRecord as apiDeleteRecord } from '../../../lib/api';
+import { saveRecord, deleteRecord as apiDeleteRecord, getRecords } from '../../../lib/api';
 import { getNowISO } from '../../../utils/dateUtils';
 
 const HEMODERIVATIVE_TYPES = [
@@ -198,8 +198,22 @@ export const RecepcionApp: React.FC = () => {
         recordsData.push({ id: doc.id, ...doc.data() } as ReceivedUnitRecord);
       });
       setRecords(recordsData);
-    }, (error) => {
+      try {
+        localStorage.setItem(`cached_${path}`, JSON.stringify(recordsData));
+      } catch {}
+    }, async (error) => {
       handleFirestoreError(error, OperationType.LIST, path);
+      try {
+        const fallback = await getRecords(path);
+        if (fallback && fallback.length > 0) {
+          setRecords(fallback);
+        } else {
+          const cached = localStorage.getItem(`cached_${path}`);
+          if (cached) setRecords(JSON.parse(cached));
+        }
+      } catch (err) {
+        console.warn('Error al cargar datos locales de recepción:', err);
+      }
     });
 
     // Fetch transfusion and disposition records to check availability
@@ -210,8 +224,12 @@ export const RecepcionApp: React.FC = () => {
         data.push({ id: doc.id, ...doc.data() });
       });
       setTransfusionRecords(data);
-    }, (error) => {
-      console.error('Error fetching transfusion records for availability:', error);
+    }, async (error) => {
+      console.warn('Aviso al consultar registros de transfusión (modo cuota/desconectado):', error.message);
+      try {
+        const fallback = await getRecords('transfusionUse');
+        if (fallback) setTransfusionRecords(fallback);
+      } catch {}
     });
 
     const dispositionQuery = query(collection(db, 'finalDisposition'));
@@ -221,8 +239,12 @@ export const RecepcionApp: React.FC = () => {
         data.push({ id: doc.id, ...doc.data() });
       });
       setDispositionRecords(data);
-    }, (error) => {
-      console.error('Error fetching disposition records for availability:', error);
+    }, async (error) => {
+      console.warn('Aviso al consultar registros de disposición (modo cuota/desconectado):', error.message);
+      try {
+        const fallback = await getRecords('finalDisposition');
+        if (fallback) setDispositionRecords(fallback);
+      } catch {}
     });
 
     const bloodTestQuery = query(collection(db, 'bloodTestRecords'));
@@ -232,8 +254,12 @@ export const RecepcionApp: React.FC = () => {
         data.push({ id: doc.id, ...doc.data() });
       });
       setBloodTestRecords(data);
-    }, (error) => {
-      console.error('Error fetching blood test records for availability:', error);
+    }, async (error) => {
+      console.warn('Aviso al consultar registros pre-transfusionales (modo cuota/desconectado):', error.message);
+      try {
+        const fallback = await getRecords('bloodTestRecords');
+        if (fallback) setBloodTestRecords(fallback);
+      } catch {}
     });
 
     return () => {

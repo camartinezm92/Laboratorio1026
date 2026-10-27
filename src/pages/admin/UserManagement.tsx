@@ -234,9 +234,19 @@ export const UserManagement: React.FC = () => {
             } else {
               setIsSuperAdmin(false);
             }
-          } catch (error) {
-            console.error("Error reading user role:", error);
-            setIsSuperAdmin(false);
+          } catch (error: any) {
+            const isQuota = (error?.message || '').includes('Quota limit exceeded') || error?.code === 'resource-exhausted';
+            const cachedRole = localStorage.getItem(`cached_role_${user.uid}`);
+            if (cachedRole === 'admin') {
+              setIsSuperAdmin(true);
+            } else {
+              setIsSuperAdmin(false);
+            }
+            if (isQuota) {
+              console.warn("Firestore cuota superada al validar rol de admin, usando caché local.");
+            } else {
+              console.warn("Aviso al leer rol de usuario:", error?.message || error);
+            }
           } finally {
             setLoading(false);
           }
@@ -273,9 +283,57 @@ export const UserManagement: React.FC = () => {
         ...doc.data()
       })) as AppUser[];
       setUsers(usersData);
+      try {
+        localStorage.setItem('cached_admin_users_list', JSON.stringify(usersData));
+      } catch {}
       setLoading(false);
     }, (error) => {
-      console.error("Error fetching users:", error);
+      const isQuota = (error?.message || '').includes('Quota limit exceeded') || (error as any)?.code === 'resource-exhausted';
+      if (isQuota) {
+        console.warn("Firestore cuota diaria superada en lista de usuarios. Mostrando usuarios en caché local.");
+      } else {
+        console.warn("Aviso al consultar usuarios:", error?.message || error);
+      }
+      const cached = localStorage.getItem('cached_admin_users_list');
+      if (cached) {
+        try {
+          setUsers(JSON.parse(cached));
+        } catch {}
+      } else {
+        // Fallback default system users
+        setUsers([
+          {
+            id: 'admin',
+            email: 'ingbiomedico@ucihonda.com.co',
+            username: 'admin',
+            role: 'admin',
+            active: true,
+            permissions: {
+              recepcion: { crear: true, consultar: true, editar: true, eliminar: true, aceptar: true, devolver: true },
+              preTransfusional: { crear: true, consultar: true, editar: true, eliminar: true, aceptar: true, devolver: true },
+              uso: { crear: true, consultar: true, editar: true, eliminar: true },
+              disposicion: { crear: true, consultar: true, editar: true, eliminar: true },
+              laboratorio: { crear: true, consultar: true },
+              insumos: { crear: true, consultar: true, consumir: true, eliminar: true }
+            }
+          },
+          {
+            id: 'laboratorio',
+            email: 'laboratorio@ucihonda.com.co',
+            username: 'laboratorio',
+            role: 'user',
+            active: true,
+            permissions: {
+              recepcion: { crear: false, consultar: false, editar: false, eliminar: false, aceptar: false, devolver: false },
+              preTransfusional: { crear: false, consultar: false, editar: false, eliminar: false, aceptar: false, devolver: false },
+              uso: { crear: false, consultar: false, editar: false, eliminar: false },
+              disposicion: { crear: false, consultar: false, editar: false, eliminar: false },
+              laboratorio: { crear: true, consultar: true },
+              insumos: { crear: false, consultar: false, consumir: false, eliminar: false }
+            }
+          }
+        ]);
+      }
       setLoading(false);
     });
 
@@ -292,7 +350,7 @@ export const UserManagement: React.FC = () => {
       })) as DetectedProfile[];
       setDetectedProfiles(profiles);
     }, (error) => {
-      console.error("Error fetching profiles:", error);
+      console.warn("Aviso al consultar perfiles:", error?.message || error);
     });
 
     return () => unsubscribe();

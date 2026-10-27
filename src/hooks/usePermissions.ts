@@ -84,6 +84,10 @@ export const usePermissions = () => {
             if (data.active) {
               setIsAdmin(data.role === 'admin');
               setPermissions(data.permissions);
+              try {
+                localStorage.setItem(`cached_permissions_${user.uid}`, JSON.stringify(data.permissions));
+                localStorage.setItem(`cached_role_${user.uid}`, data.role || 'user');
+              } catch {}
             } else {
               setPermissions(null);
               setIsAdmin(false);
@@ -95,7 +99,36 @@ export const usePermissions = () => {
           }
           setLoading(false);
         }, (error) => {
-          console.error(`Error fetching user permissions for ${user.email} (${user.uid}):`, error);
+          const isQuota = (error?.message || '').includes('Quota limit exceeded') || (error as any)?.code === 'resource-exhausted';
+          if (isQuota) {
+            console.warn(`[Firestore Quota] Límite de consultas alcanzado. Usando permisos en caché para ${user.email}.`);
+          } else {
+            console.warn(`Aviso al obtener permisos en tiempo real para ${user.email}:`, error.message);
+          }
+
+          // Fallback to cached permissions
+          try {
+            const cachedPerms = localStorage.getItem(`cached_permissions_${user.uid}`) || localStorage.getItem(`cached_permissions_${user.email}`);
+            const cachedRole = localStorage.getItem(`cached_role_${user.uid}`) || localStorage.getItem(`cached_role_${user.email}`);
+            if (cachedPerms) {
+              setPermissions(JSON.parse(cachedPerms));
+              setIsAdmin(cachedRole === 'admin');
+              setLoading(false);
+              return;
+            }
+
+            const authUserData = localStorage.getItem('auth_user_data');
+            if (authUserData) {
+              const parsed = JSON.parse(authUserData);
+              if (parsed.permissions) {
+                setPermissions(parsed.permissions);
+                setIsAdmin(parsed.role === 'admin');
+                setLoading(false);
+                return;
+              }
+            }
+          } catch {}
+
           setPermissions(null);
           setIsAdmin(false);
           setLoading(false);

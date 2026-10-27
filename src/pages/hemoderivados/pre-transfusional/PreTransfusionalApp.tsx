@@ -9,7 +9,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { auth, db, loginWithGoogle, logout, handleFirestoreError, OperationType } from '../../../firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { collection, onSnapshot, query, orderBy, where, getDocs, doc, deleteDoc } from 'firebase/firestore';
-import { saveRecord as apiSaveRecord, deleteRecord as apiDeleteRecord } from '../../../lib/api';
+import { saveRecord as apiSaveRecord, deleteRecord as apiDeleteRecord, getRecords } from '../../../lib/api';
 import { getNowISO } from '../../../utils/dateUtils';
 
 const HEMO_TYPES = [
@@ -252,8 +252,22 @@ export const PreTransfusionalApp: React.FC = () => {
         ...doc.data()
       })) as BloodTestRecord[];
       setRecords(fetchedRecords);
-    }, (error) => {
+      try {
+        localStorage.setItem(`cached_${path}`, JSON.stringify(fetchedRecords));
+      } catch {}
+    }, async (error) => {
       handleFirestoreError(error, OperationType.GET, path);
+      try {
+        const fallback = await getRecords(path);
+        if (fallback && fallback.length > 0) {
+          setRecords(fallback);
+        } else {
+          const cached = localStorage.getItem(`cached_${path}`);
+          if (cached) setRecords(JSON.parse(cached));
+        }
+      } catch (err) {
+        console.warn('Error al cargar datos locales pre-transfusionales:', err);
+      }
     });
 
     const receivedUnitsPath = 'receivedUnits';
@@ -264,8 +278,20 @@ export const PreTransfusionalApp: React.FC = () => {
         ...doc.data()
       }));
       setReceivedUnits(fetchedReceivedUnits);
-    }, (error) => {
+      try {
+        localStorage.setItem(`cached_${receivedUnitsPath}`, JSON.stringify(fetchedReceivedUnits));
+      } catch {}
+    }, async (error) => {
       handleFirestoreError(error, OperationType.GET, receivedUnitsPath);
+      try {
+        const fallback = await getRecords(receivedUnitsPath);
+        if (fallback && fallback.length > 0) {
+          setReceivedUnits(fallback);
+        } else {
+          const cached = localStorage.getItem(`cached_${receivedUnitsPath}`);
+          if (cached) setReceivedUnits(JSON.parse(cached));
+        }
+      } catch {}
     });
 
     const transfusionPath = 'transfusionUse';
@@ -273,6 +299,12 @@ export const PreTransfusionalApp: React.FC = () => {
     const unsubscribeTransfusion = onSnapshot(qTransfusion, (snapshot) => {
       const fetched = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setTransfusionRecords(fetched);
+    }, async (err) => {
+      console.warn('Aviso de transfusiones (cuota/desconectado):', err.message);
+      try {
+        const fallback = await getRecords(transfusionPath);
+        if (fallback) setTransfusionRecords(fallback);
+      } catch {}
     });
 
     const dispositionPath = 'finalDisposition';
@@ -280,6 +312,12 @@ export const PreTransfusionalApp: React.FC = () => {
     const unsubscribeDisposition = onSnapshot(qDisposition, (snapshot) => {
       const fetched = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setDispositionRecords(fetched);
+    }, async (err) => {
+      console.warn('Aviso de disposiciones (cuota/desconectado):', err.message);
+      try {
+        const fallback = await getRecords(dispositionPath);
+        if (fallback) setDispositionRecords(fallback);
+      } catch {}
     });
 
     return () => {

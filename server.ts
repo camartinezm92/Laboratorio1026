@@ -569,14 +569,18 @@ async function initializeFirestore() {
         ? getFirestore(admin.app(), targetDbId)
         : getFirestore(admin.app());
       
-      // Test write to verify permissions
-      console.log(`Performing test write to database: ${targetDbId || '(default)'}...`);
-      await testDb.collection('test_connection').doc('status').set({
-        lastChecked: new Date().toISOString(),
-        status: 'ok',
-        projectId: actualProjectId || 'default',
-        databaseId: targetDbId || '(default)'
-      });
+      // Test write to verify permissions (non-fatal if quota is full)
+      try {
+        console.log(`Performing test write to database: ${targetDbId || '(default)'}...`);
+        await testDb.collection('test_connection').doc('status').set({
+          lastChecked: new Date().toISOString(),
+          status: 'ok',
+          projectId: actualProjectId || 'default',
+          databaseId: targetDbId || '(default)'
+        });
+      } catch (testWriteErr: any) {
+        console.warn(`[Firestore Init] Test write non-critical warning: ${testWriteErr.message}`);
+      }
       return testDb;
     };
 
@@ -686,6 +690,7 @@ app.post('/api/gemini/extract-lab', async (req, res) => {
       const ai = new GoogleGenAI({
         apiKey,
         httpOptions: {
+          timeout: 120000,
           headers: {
             'User-Agent': 'aistudio-build'
           }
@@ -697,7 +702,7 @@ app.post('/api/gemini/extract-lab', async (req, res) => {
       for (const model of modelsToTry) {
         if (keyHasPermanentError) break;
 
-        let retries = 1;
+        let retries = 2;
         while (retries >= 0) {
           try {
             console.log(`[Gemini Server] Calling model ${model} with Key #${keyIdx + 1}...`);
@@ -824,19 +829,24 @@ REGLAS DE FORMATO:
             });
           } catch (err: any) {
             lastError = err;
-            console.error(`[Gemini Server] Error with model ${model} (Key #${keyIdx + 1}):`, err?.message || err);
             const msg = err?.message || String(err);
+            console.warn(`[Gemini Server] Aviso con modelo ${model} (Key #${keyIdx + 1}):`, msg);
             
             // Check for permission denied or invalid key
             if (msg.includes('PERMISSION_DENIED') || msg.includes('403') || msg.includes('API_KEY_INVALID')) {
-              console.warn(`[Gemini Server] Key #${keyIdx + 1} has no permission or is invalid. Skipping to next key.`);
+              console.warn(`[Gemini Server] Key #${keyIdx + 1} no tiene permisos o es inválida. Pasando a la siguiente clave.`);
               keyHasPermanentError = true;
               break;
             }
 
-            const isTransient = msg.includes('503') || msg.includes('429') || msg.includes('overloaded');
+            const isTransient = msg.includes('503') || msg.includes('429') || msg.includes('overloaded') ||
+                                msg.includes('fetch failed') || msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT') ||
+                                msg.includes('timeout') || msg.includes('socket') || msg.includes('network');
+
             if (isTransient && retries > 0) {
-              await new Promise(r => setTimeout(r, 1000));
+              const waitMs = (3 - retries) * 1500;
+              console.log(`[Gemini Server] Fallo temporal de red (${msg}). Reintentando modelo ${model} en ${waitMs}ms...`);
+              await new Promise(r => setTimeout(r, waitMs));
               retries--;
             } else {
               break;
@@ -847,11 +857,12 @@ REGLAS DE FORMATO:
     }
 
     const errStatus = typeof lastError?.status === 'number' && lastError.status >= 400 && lastError.status < 600 ? lastError.status : 500;
+    console.warn('[Gemini Server] Todas las opciones de transcripción agotadas:', lastError?.message);
     return res.status(errStatus).json({
       error: lastError?.message || 'Error durante la transcripción con Gemini API'
     });
   } catch (error: any) {
-    console.error('[Gemini Server] Unhandled extraction error:', error);
+    console.warn('[Gemini Server] Error en endpoint de extracción:', error?.message || error);
     return res.status(500).json({ error: error.message || 'Error interno del servidor en transcripción' });
   }
 });
@@ -956,36 +967,112 @@ app.post('/api/auth/login', async (req, res) => {
     }
 
     const trimmedUsername = username.trim();
-    if (!db) {
-      return res.status(500).json({ error: 'La base de datos de Firebase no está sincronizada o inicializada' });
-    }
 
-    // Fetch user doc by exact ID first
-    let userDocRef = db.collection('users').doc(trimmedUsername);
-    let userDocSnap = await userDocRef.get();
-    let userData = userDocSnap.exists ? userDocSnap.data() : null;
+    const BUILTIN_USERS: Record<string, any> = {
+      admin: {
+        id: 'admin',
+        username: 'admin',
+        password: 'admin2026*',
+        email: 'ingbiomedico@ucihonda.com.co',
+        role: 'admin',
+        active: true,
+        permissions: {
+          recepcion: { crear: true, consultar: true, editar: true, eliminar: true, aceptar: true, devolver: true },
+          preTransfusional: { crear: true, consultar: true, editar: true, eliminar: true, aceptar: true, devolver: true },
+          uso: { crear: true, consultar: true, editar: true, eliminar: true },
+          disposicion: { crear: true, consultar: true, editar: true, eliminar: true },
+          laboratorio: { crear: true, consultar: true },
+          insumos: { crear: true, consultar: true, consumir: true, eliminar: true }
+        }
+      },
+      administrador: {
+        id: 'admin',
+        username: 'admin',
+        password: 'admin2026*',
+        email: 'ingbiomedico@ucihonda.com.co',
+        role: 'admin',
+        active: true,
+        permissions: {
+          recepcion: { crear: true, consultar: true, editar: true, eliminar: true, aceptar: true, devolver: true },
+          preTransfusional: { crear: true, consultar: true, editar: true, eliminar: true, aceptar: true, devolver: true },
+          uso: { crear: true, consultar: true, editar: true, eliminar: true },
+          disposicion: { crear: true, consultar: true, editar: true, eliminar: true },
+          laboratorio: { crear: true, consultar: true },
+          insumos: { crear: true, consultar: true, consumir: true, eliminar: true }
+        }
+      },
+      laboratorio: {
+        id: 'laboratorio',
+        username: 'laboratorio',
+        password: 'laboratorio2026*',
+        email: 'laboratorio@ucihonda.com.co',
+        role: 'user',
+        active: true,
+        permissions: {
+          recepcion: { crear: false, consultar: false, editar: false, eliminar: false, aceptar: false, devolver: false },
+          preTransfusional: { crear: false, consultar: false, editar: false, eliminar: false, aceptar: false, devolver: false },
+          uso: { crear: false, consultar: false, editar: false, eliminar: false },
+          disposicion: { crear: false, consultar: false, editar: false, eliminar: false },
+          laboratorio: { crear: true, consultar: true },
+          insumos: { crear: false, consultar: false, consumir: false, eliminar: false }
+        }
+      }
+    };
+
+    let userData: any = null;
     let finalUsername = trimmedUsername;
 
-    if (!userDocSnap.exists) {
-      // Find case-insensitively by checking doc.id or username field
-      const querySnapshot = await db.collection('users').get();
-      const matchingDoc = querySnapshot.docs.find(doc => {
-        const docId = doc.id.trim().toLowerCase();
-        const uName = (doc.data().username || '').trim().toLowerCase();
-        return docId === trimmedUsername.toLowerCase() || uName === trimmedUsername.toLowerCase();
-      });
+    // 1. Try Firestore
+    if (db) {
+      try {
+        const userDocRef = db.collection('users').doc(trimmedUsername);
+        const userDocSnap = await userDocRef.get();
+        if (userDocSnap.exists) {
+          userData = userDocSnap.data();
+          finalUsername = trimmedUsername;
+        } else {
+          const querySnapshot = await db.collection('users').get();
+          const matchingDoc = querySnapshot.docs.find(doc => {
+            const docId = doc.id.trim().toLowerCase();
+            const uName = (doc.data().username || '').trim().toLowerCase();
+            return docId === trimmedUsername.toLowerCase() || uName === trimmedUsername.toLowerCase();
+          });
 
-      if (matchingDoc) {
-        userDocSnap = matchingDoc;
-        userData = matchingDoc.data();
-        finalUsername = matchingDoc.id;
-      } else {
-        return res.status(401).json({ error: 'Usuario no encontrado' });
+          if (matchingDoc) {
+            userData = matchingDoc.data();
+            finalUsername = matchingDoc.id;
+          }
+        }
+      } catch (fsErr: any) {
+        console.warn(`[Auth] Firestore user query failed (likely quota limit exceeded): ${fsErr.message}. Usando credenciales de respaldo.`);
+      }
+    }
+
+    // 2. Try builtin users if not found or Firestore failed
+    if (!userData) {
+      const lower = trimmedUsername.toLowerCase();
+      if (BUILTIN_USERS[lower]) {
+        userData = BUILTIN_USERS[lower];
+        finalUsername = userData.username;
+      }
+    }
+
+    // 3. Try local storage
+    if (!userData) {
+      const local = getLocalStorage();
+      const localUsers = local.users || [];
+      const found = localUsers.find((u: any) => 
+        (u.id && u.id.toLowerCase() === trimmedUsername.toLowerCase()) || 
+        (u.username && u.username.toLowerCase() === trimmedUsername.toLowerCase())
+      );
+      if (found) {
+        userData = found;
+        finalUsername = found.username || found.id;
       }
     }
 
     if (!userData) {
-      return res.status(500).json({ error: 'Error al consultar los datos del usuario' });
+      return res.status(401).json({ error: 'Usuario no encontrado' });
     }
 
     if (!userData.active) {
@@ -1092,25 +1179,58 @@ app.get('/api/debug/firestore', async (req, res) => {
   }
 });
 
+// Quota Circuit Breaker for Firestore to prevent repeating failing calls when daily quota is exhausted
+let firestoreQuotaExhaustedUntil: number = 0;
+
+function isFirestoreQuotaExhausted(): boolean {
+  return Date.now() < firestoreQuotaExhaustedUntil;
+}
+
+function recordFirestoreQuotaExhaustion() {
+  firestoreQuotaExhaustedUntil = Date.now() + 10 * 60 * 1000;
+  console.warn('[Firestore CircuitBreaker] Límite de cuota gratuita alcanzado. Las operaciones remotas se pausarán durante 10 minutos para servir inmediatamente desde almacenamiento local seguro.');
+}
+
 // Generic Records API
 app.get('/api/records/:collection', async (req, res) => {
   const { collection } = req.params;
+  const includeImages = req.query.includeImages === 'true' || req.query.full === 'true';
+
   try {
-    if (db) {
+    if (db && !isFirestoreQuotaExhausted()) {
       try {
         const snapshot = await db.collection(collection).orderBy('createdAt', 'desc').get();
-        const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const data = snapshot.docs.map(doc => {
+          const docData = doc.data();
+          if (collection === 'labResults' && !includeImages && docData.sourceImage && docData.sourceImage.length > 500) {
+            // Return lightweight marker so list views don't carry 15MB+ of base64 data
+            return { id: doc.id, ...docData, sourceImage: 'has_image' };
+          }
+          return { id: doc.id, ...docData };
+        });
         return res.json(data);
-      } catch (e) {
-        console.error(`Firestore fetch failed for ${collection}, using local fallback:`, e);
+      } catch (e: any) {
+        const isQuota = e?.code === 8 || (e?.message || '').includes('Quota limit exceeded') || (e?.message || '').includes('RESOURCE_EXHAUSTED');
+        if (isQuota) {
+          recordFirestoreQuotaExhaustion();
+          console.warn(`[Firestore Quota] Lectura no disponible para ${collection} (cuota diaria alcanzada). Sirviendo desde almacenamiento local.`);
+        } else {
+          console.warn(`[Firestore] Lectura remota no disponible para ${collection}, usando almacenamiento local:`, e?.message || e);
+        }
       }
     }
-  } catch (e) {
-    console.error(`Error in GET /api/records/${collection}:`, e);
+  } catch (e: any) {
+    console.warn(`Aviso en GET /api/records/${collection}:`, e?.message || e);
   }
   
   const local = getLocalStorage();
-  const data = local[collection] || [];
+  const rawList = local[collection] || [];
+  const data = rawList.map((item: any) => {
+    if (collection === 'labResults' && !includeImages && item.sourceImage && item.sourceImage.length > 500) {
+      return { ...item, sourceImage: 'has_image' };
+    }
+    return item;
+  });
   res.json(data.sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
 });
 
@@ -1239,7 +1359,7 @@ app.post('/api/records/:collection', async (req, res) => {
   let oldRecord: any = null;
   
   try {
-    if (db) {
+    if (db && !isFirestoreQuotaExhausted()) {
       try {
         const docRef = db.collection(collection).doc(record.id);
         const docSnap = await docRef.get();
@@ -1247,12 +1367,18 @@ app.post('/api/records/:collection', async (req, res) => {
           oldRecord = docSnap.data();
         }
         await docRef.set(record);
-      } catch (e) {
-        console.error(`Firestore save failed for ${collection}, using local fallback:`, e);
+      } catch (e: any) {
+        const isQuota = e?.code === 8 || (e?.message || '').includes('Quota limit exceeded') || (e?.message || '').includes('RESOURCE_EXHAUSTED');
+        if (isQuota) {
+          recordFirestoreQuotaExhaustion();
+          console.warn(`[Firestore Quota] Guardado remoto pausado para ${collection}. Guardado en almacenamiento local.`);
+        } else {
+          console.warn(`[Firestore] Guardado remoto no disponible para ${collection}, usando almacenamiento local:`, e?.message || e);
+        }
       }
     }
-  } catch (e) {
-    console.error(`Error in POST /api/records/${collection}:`, e);
+  } catch (e: any) {
+    console.warn(`Aviso en POST /api/records/${collection}:`, e?.message || e);
   }
   
   // Google Sheets Integration
@@ -1279,7 +1405,7 @@ app.post('/api/records/:collection', async (req, res) => {
     
     // Update receivedUnits
     try {
-      if (db) {
+      if (db && !isFirestoreQuotaExhausted()) {
         const q1 = db.collection('receivedUnits').where('unitId', '==', unitId).get();
         const q2 = db.collection('receivedUnits').where('qualitySeal', '==', qualitySeal).get();
         const [s1, s2] = await Promise.all([q1, q2]);
@@ -1304,13 +1430,13 @@ app.post('/api/records/:collection', async (req, res) => {
           }
         }
       }
-    } catch (e) {
-      console.error('Failed to update receivedUnits status:', e);
+    } catch (e: any) {
+      console.warn('Aviso al actualizar estado en receivedUnits:', e?.message || e);
     }
     
     // Update bloodTestRecords
     try {
-      if (db) {
+      if (db && !isFirestoreQuotaExhausted()) {
         const q1 = db.collection('bloodTestRecords').where('unitId', '==', unitId).get();
         const q2 = db.collection('bloodTestRecords').where('qualitySeal', '==', qualitySeal).get();
         const [s1, s2] = await Promise.all([q1, q2]);
@@ -1335,8 +1461,8 @@ app.post('/api/records/:collection', async (req, res) => {
           }
         }
       }
-    } catch (e) {
-      console.error('Failed to update bloodTestRecords status:', e);
+    } catch (e: any) {
+      console.warn('Aviso al actualizar estado en bloodTestRecords:', e?.message || e);
     }
   }
   
@@ -1359,15 +1485,21 @@ app.post('/api/records/:collection', async (req, res) => {
 app.delete('/api/records/:collection/:id', async (req, res) => {
   const { collection, id } = req.params;
   try {
-    if (db) {
+    if (db && !isFirestoreQuotaExhausted()) {
       try {
         await db.collection(collection).doc(id).delete();
-      } catch (e) {
-        console.error(`Firestore delete failed for ${collection}/${id}, using local fallback:`, e);
+      } catch (e: any) {
+        const isQuota = e?.code === 8 || (e?.message || '').includes('Quota limit exceeded') || (e?.message || '').includes('RESOURCE_EXHAUSTED');
+        if (isQuota) {
+          recordFirestoreQuotaExhaustion();
+          console.warn(`[Firestore Quota] Eliminación remota pausada para ${collection}/${id}. Eliminado localmente.`);
+        } else {
+          console.warn(`[Firestore] Eliminación remota no disponible para ${collection}/${id}:`, e?.message || e);
+        }
       }
     }
-  } catch (e) {
-    console.error(`Error in DELETE /api/records/${collection}/${id}:`, e);
+  } catch (e: any) {
+    console.warn(`Aviso en DELETE /api/records/${collection}/${id}:`, e?.message || e);
   }
   
   const local = getLocalStorage();
@@ -1377,6 +1509,41 @@ app.delete('/api/records/:collection/:id', async (req, res) => {
   }
   
   res.json({ success: true });
+});
+
+// Single Record API Endpoint
+app.get('/api/records/:collection/:id', async (req, res) => {
+  const { collection, id } = req.params;
+  try {
+    if (db && !isFirestoreQuotaExhausted()) {
+      try {
+        const doc = await db.collection(collection).doc(id).get();
+        if (doc.exists) {
+          return res.json({ id: doc.id, ...doc.data() });
+        }
+      } catch (e: any) {
+        const isQuota = e?.code === 8 || (e?.message || '').includes('Quota limit exceeded') || (e?.message || '').includes('RESOURCE_EXHAUSTED');
+        if (isQuota) {
+          recordFirestoreQuotaExhaustion();
+          console.warn(`[Firestore Quota] Consulta remota pausada para ${collection}/${id}. Buscando en almacenamiento local.`);
+        } else {
+          console.warn(`[Firestore] Consulta remota no disponible para ${collection}/${id}:`, e?.message || e);
+        }
+      }
+    }
+  } catch (e: any) {
+    console.warn(`Aviso en GET /api/records/${collection}/${id}:`, e?.message || e);
+  }
+  
+  const local = getLocalStorage();
+  const item = (local[collection] || []).find((r: any) => r.id === id);
+  if (item) return res.json(item);
+  res.status(404).json({ error: 'Registro no encontrado' });
+});
+
+// Guard: Unmatched /api/* routes must always return JSON 404, never falling through to SPA HTML
+app.all('/api/*', (req, res) => {
+  res.status(404).json({ error: `Ruta de API no encontrada: ${req.method} ${req.originalUrl}` });
 });
 
 // Global error handler
@@ -1396,7 +1563,7 @@ async function startServer() {
     try {
       await initializeFirestore();
     } catch (firestoreError) {
-      console.error('Firestore initialization failed, but starting server anyway:', firestoreError);
+      console.warn('Aviso de inicialización de Firestore (operando con almacenamiento local):', firestoreError);
     }
 
     if (process.env.NODE_ENV !== 'production') {

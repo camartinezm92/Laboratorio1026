@@ -102,4 +102,7 @@ export interface LabResultData {
   validationWarning?: string;
   bacteriologist?: string;
   registryNumber?: string;
+  createdAt?: string;
+  uid?: string;
+  userEmail?: string;
 }

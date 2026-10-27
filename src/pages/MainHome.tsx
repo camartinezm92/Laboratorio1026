@@ -25,7 +25,7 @@ export const MainHome: React.FC = () => {
     const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setUser(u);
       if (u) {
-        // Record user profile for admin management
+        // Record user profile for admin management (non-blocking)
         try {
           await setDoc(doc(db, 'user_profiles', u.uid), {
             email: u.email || 'no-email',
@@ -34,20 +34,43 @@ export const MainHome: React.FC = () => {
             lastLogin: getNowISO(),
             uid: u.uid
           }, { merge: true });
-        } catch (e) {
-          console.error("Error recording profile:", e);
+        } catch (e: any) {
+          console.warn("Aviso al registrar perfil en Firestore (modo desconectado/cuota):", e?.message || e);
         }
 
         const isSuper = u.uid === 'admin' || u.email?.toLowerCase() === "ingbiomedico@ucihonda.com.co";
         if (isSuper) {
           setIsAuthorized(true);
+          const defaultAdmin = {
+            username: u.displayName || u.uid || 'admin',
+            role: 'admin',
+            active: true,
+            email: u.email || 'ingbiomedico@ucihonda.com.co'
+          };
+          setDbUser(defaultAdmin);
+
           try {
             const userDoc = await getDoc(doc(db, 'users', u.uid));
             if (userDoc.exists()) {
-              setDbUser(userDoc.data());
+              const uData = userDoc.data();
+              setDbUser(uData);
+              try {
+                localStorage.setItem(`cached_user_${u.uid}`, JSON.stringify(uData));
+              } catch {}
             }
-          } catch(err) {
-            console.error("Error reading admin data:", err);
+          } catch(err: any) {
+            const isQuota = (err?.message || '').includes('Quota limit exceeded') || (err?.code === 'resource-exhausted');
+            if (isQuota) {
+              console.warn("Firestore: Cuota diaria de lecturas superada en el plan gratuito. Operando en modo local seguro con perfil de administrador.");
+            } else {
+              console.warn("Aviso al obtener datos remotos de administrador, usando perfil local:", err?.message || err);
+            }
+            const cached = localStorage.getItem(`cached_user_${u.uid}`) || localStorage.getItem('auth_user_data');
+            if (cached) {
+              try {
+                setDbUser(JSON.parse(cached));
+              } catch {}
+            }
           }
           setLoading(false);
         } else {
@@ -57,17 +80,39 @@ export const MainHome: React.FC = () => {
             if (userDoc.exists()) {
               const uData = userDoc.data();
               setDbUser(uData);
-              if (uData.active) {
-                setIsAuthorized(true);
+              try {
+                localStorage.setItem(`cached_user_${u.uid}`, JSON.stringify(uData));
+              } catch {}
+              setIsAuthorized(!!uData.active);
+            } else {
+              const cached = localStorage.getItem(`cached_user_${u.uid}`) || localStorage.getItem('auth_user_data');
+              if (cached) {
+                const parsed = JSON.parse(cached);
+                setDbUser(parsed);
+                setIsAuthorized(!!parsed.active);
               } else {
+                setIsAuthorized(false);
+              }
+            }
+          } catch (error: any) {
+            const isQuota = (error?.message || '').includes('Quota limit exceeded') || (error?.code === 'resource-exhausted');
+            if (isQuota) {
+              console.warn("Firestore: Cuota diaria alcanzada. Recuperando autorización del usuario desde la caché local.");
+            } else {
+              console.warn("Aviso al verificar autorización del usuario:", error?.message || error);
+            }
+            const cached = localStorage.getItem(`cached_user_${u.uid}`) || localStorage.getItem('auth_user_data');
+            if (cached) {
+              try {
+                const parsed = JSON.parse(cached);
+                setDbUser(parsed);
+                setIsAuthorized(!!parsed.active);
+              } catch {
                 setIsAuthorized(false);
               }
             } else {
               setIsAuthorized(false);
             }
-          } catch (error) {
-            console.error("Error checking authorization:", error);
-            setIsAuthorized(false);
           }
           setLoading(false);
         }

@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Download, FileText, Trash2, Edit2, Save } from 'lucide-react';
 import { LabResultData, LabParameter, getCategory, LAB_CATEGORIES } from './types';
 import { generatePdf, generateJson } from './services/pdfService';
 import { formatColombia } from '../../utils/dateUtils';
 import { PROFESSIONALS } from '../../constants';
+import { loadResultById } from './services/storageService';
 
 interface Props {
   result: LabResultData;
@@ -18,6 +19,24 @@ interface Props {
 export const LaboratorioDetailModal: React.FC<Props> = ({ result, onClose, onDelete, onUpdate }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editedResult, setEditedResult] = useState<LabResultData>(result);
+  const [loadedSourceImage, setLoadedSourceImage] = useState<string | undefined>(
+    result.sourceImage && result.sourceImage !== 'has_image' ? result.sourceImage : undefined
+  );
+  const [isLoadingImage, setIsLoadingImage] = useState(result.sourceImage === 'has_image');
+
+  useEffect(() => {
+    if (result.sourceImage === 'has_image') {
+      setIsLoadingImage(true);
+      loadResultById(result.id)
+        .then(full => {
+          if (full?.sourceImage && full.sourceImage !== 'has_image') {
+            setLoadedSourceImage(full.sourceImage);
+          }
+        })
+        .catch(err => console.warn('Could not load original document image:', err))
+        .finally(() => setIsLoadingImage(false));
+    }
+  }, [result.id, result.sourceImage]);
 
   const handleSave = () => {
     onUpdate(result.id, editedResult);
@@ -372,25 +391,32 @@ export const LaboratorioDetailModal: React.FC<Props> = ({ result, onClose, onDel
             </div>
           </div>
 
-          {!isEditing && result.sourceImage && (
+          {!isEditing && (result.sourceImage || loadedSourceImage) && (
             <div>
               <h3 className="text-lg font-semibold text-slate-800 border-b pb-2 mb-4">Documento Original</h3>
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-center">
-                {result.sourceMimeType === 'application/pdf' || result.sourceImage.startsWith('data:application/pdf') ? (
-                  <iframe 
-                    src={result.sourceImage} 
-                    title="Documento original PDF"
-                    className="w-full h-[600px] rounded-lg shadow-sm border-0"
-                  />
-                ) : (
-                  <img 
-                    src={result.sourceImage} 
-                    alt="Documento original" 
-                    className="max-w-full h-auto max-h-[600px] object-contain rounded-lg shadow-sm"
-                    referrerPolicy="no-referrer"
-                  />
-                )}
-              </div>
+              {isLoadingImage ? (
+                <div className="bg-slate-50 p-8 rounded-xl border border-slate-200 flex flex-col items-center justify-center text-slate-400 gap-2">
+                  <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-brand-600"></div>
+                  <span className="text-xs font-medium">Cargando documento original...</span>
+                </div>
+              ) : loadedSourceImage ? (
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex justify-center">
+                  {result.sourceMimeType === 'application/pdf' || loadedSourceImage.startsWith('data:application/pdf') ? (
+                    <iframe 
+                      src={loadedSourceImage} 
+                      title="Documento original PDF"
+                      className="w-full h-[600px] rounded-lg shadow-sm border-0"
+                    />
+                  ) : (
+                    <img 
+                      src={loadedSourceImage} 
+                      alt="Documento original" 
+                      className="max-w-full h-auto max-h-[600px] object-contain rounded-lg shadow-sm"
+                      referrerPolicy="no-referrer"
+                    />
+                  )}
+                </div>
+              ) : null}
             </div>
           )}
         </div>
