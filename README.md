@@ -41,6 +41,8 @@ Crea o edita tu archivo `.env.local` (o `.env`) en la raíz del proyecto basánd
 GEMINI_API_KEY_1=tu_clave_gemini_1
 GEMINI_API_KEY_2=tu_clave_gemini_2
 GEMINI_API_KEY_3=tu_clave_gemini_3
+GEMINI_API_KEY_4=tu_clave_gemini_4
+GEMINI_API_KEY_5=tu_clave_gemini_5
 
 # Clave fallback opcional:
 GEMINI_API_KEY=tu_clave_gemini_principal

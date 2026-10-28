@@ -560,27 +560,12 @@ async function initializeFirestore() {
     const actualProjectId = appInstance.options.projectId;
     console.log(`Firebase App Project ID: ${actualProjectId || 'default'}`);
 
-    // Try to initialize Firestore
+    // Try to initialize Firestore (instantaneous initialization without blocking test writes)
     const tryConnect = async (targetDbId: string | undefined) => {
-      console.log(`Attempting to connect to database: ${targetDbId || '(default)'} in project ${actualProjectId || 'default'}`);
-      
-      // Use getFirestore from admin app to ensure it uses the app's credentials
+      console.log(`Connecting to Firestore database: ${targetDbId || '(default)'} in project ${actualProjectId || 'default'}`);
       const testDb = targetDbId 
         ? getFirestore(admin.app(), targetDbId)
         : getFirestore(admin.app());
-      
-      // Test write to verify permissions (non-fatal if quota is full)
-      try {
-        console.log(`Performing test write to database: ${targetDbId || '(default)'}...`);
-        await testDb.collection('test_connection').doc('status').set({
-          lastChecked: new Date().toISOString(),
-          status: 'ok',
-          projectId: actualProjectId || 'default',
-          databaseId: targetDbId || '(default)'
-        });
-      } catch (testWriteErr: any) {
-        console.warn(`[Firestore Init] Test write non-critical warning: ${testWriteErr.message}`);
-      }
       return testDb;
     };
 
@@ -660,12 +645,27 @@ app.post('/api/gemini/extract-lab', async (req, res) => {
       return res.status(400).json({ error: 'base64Data es requerido para la transcripción.' });
     }
 
-    const rawKeys = [
+    // Collect all configured Gemini API keys (GEMINI_API_KEY, GEMINI_API_KEY_1 to GEMINI_API_KEY_5, etc.)
+    const explicitKeys = [
       process.env.GEMINI_API_KEY,
       process.env.GEMINI_API_KEY_1,
       process.env.GEMINI_API_KEY_2,
-      process.env.GEMINI_API_KEY_3
-    ].filter(Boolean) as string[];
+      process.env.GEMINI_API_KEY_3,
+      process.env.GEMINI_API_KEY_4,
+      process.env.GEMINI_API_KEY_5,
+      process.env.GEMINI_API_KEY_6,
+      process.env.GEMINI_API_KEY_7,
+      process.env.GEMINI_API_KEY_8,
+      process.env.GEMINI_API_KEY_9,
+      process.env.GEMINI_API_KEY_10,
+    ];
+
+    const dynamicKeys = Object.keys(process.env)
+      .filter(k => k.startsWith('GEMINI_API_KEY'))
+      .sort()
+      .map(k => process.env[k]);
+
+    const rawKeys = Array.from(new Set([...explicitKeys, ...dynamicKeys])).filter(Boolean) as string[];
 
     if (rawKeys.length === 0) {
       console.error('[Gemini Server] No GEMINI_API_KEY available in process.env');
@@ -1560,11 +1560,10 @@ async function startServer() {
   try {
     // Attempt Firestore initialization but don't crash the server if it fails
     // This allows the server to start and provide feedback to the user
-    try {
-      await initializeFirestore();
-    } catch (firestoreError) {
+    // Initialize Firestore in background without blocking server startup on port 3000
+    initializeFirestore().catch(firestoreError => {
       console.warn('Aviso de inicialización de Firestore (operando con almacenamiento local):', firestoreError);
-    }
+    });
 
     if (process.env.NODE_ENV !== 'production') {
       const vite = await createViteServer({
