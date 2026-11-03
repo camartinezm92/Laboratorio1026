@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
 import { useNavigate } from 'react-router-dom';
-import { Droplets, Inbox, Activity, CheckCircle, ArrowRight, FileText, ArrowLeft, Lock } from 'lucide-react';
+import { Droplets, Inbox, Activity, CheckCircle, ArrowRight, FileText, ArrowLeft, Lock, FileCheck, Sparkles } from 'lucide-react';
 import { TraceabilityExportModal } from './components/TraceabilityExportModal';
 import { SimpleConfirmModal } from '../../components/SimpleConfirmModal';
 import { ExcelExportButton } from '../../components/ExcelExportButton';
@@ -48,9 +48,18 @@ export const HemoderivadosHome: React.FC = () => {
 
   const modules = [
     {
+      id: 'ingreso',
+      title: '1. Ingreso (Pre-Recepción IA)',
+      description: 'Lectura inteligente de albaranes de entrega y control previo de unidades con IA.',
+      icon: <FileCheck size={32} />,
+      color: 'bg-indigo-50 text-indigo-600',
+      hoverColor: 'hover:bg-indigo-600 hover:text-white',
+      path: '/hemoderivados/ingreso'
+    },
+    {
       id: 'recepcion',
-      title: 'Recepción',
-      description: 'Gestión de ingreso y registro inicial de hemoderivados.',
+      title: '2. Recepción Física',
+      description: 'Validación de temperatura, empaque e integridad de unidades ingresadas.',
       icon: <Inbox size={32} />,
       color: 'bg-blue-50 text-blue-600',
       hoverColor: 'hover:bg-blue-600 hover:text-white',
@@ -58,7 +67,7 @@ export const HemoderivadosHome: React.FC = () => {
     },
     {
       id: 'pre-transfusional',
-      title: 'Pre-transfusional',
+      title: '3. Pre-transfusional',
       description: 'Pruebas cruzadas y compatibilidad sanguínea.',
       icon: <Droplets size={32} />,
       color: 'bg-red-50 text-red-600',
@@ -67,7 +76,7 @@ export const HemoderivadosHome: React.FC = () => {
     },
     {
       id: 'uso',
-      title: 'Uso',
+      title: '4. Uso',
       description: 'Registro de transfusiones y seguimiento de pacientes.',
       icon: <Activity size={32} />,
       color: 'bg-emerald-50 text-emerald-600',
@@ -76,7 +85,7 @@ export const HemoderivadosHome: React.FC = () => {
     },
     {
       id: 'disposicion',
-      title: 'Disposición Final',
+      title: '5. Disposición Final',
       description: 'Control de unidades descartadas y disposición final.',
       icon: <CheckCircle size={32} />,
       color: 'bg-purple-50 text-purple-600',

@@ -7,9 +7,17 @@ interface RecepcionFormProps {
   onSubmit: (records: Omit<ReceivedUnitRecord, 'id' | 'createdAt' | 'uid' | 'userEmail'>[]) => Promise<void>;
   isSubmitting: boolean;
   initialData?: ReceivedUnitRecord;
+  pendingUnits?: ReceivedUnitRecord[];
+  onSelectPendingUnit?: (unit: ReceivedUnitRecord) => void;
 }
 
-export const RecepcionForm: React.FC<RecepcionFormProps> = ({ onSubmit, isSubmitting, initialData }) => {
+export const RecepcionForm: React.FC<RecepcionFormProps> = ({ 
+  onSubmit, 
+  isSubmitting, 
+  initialData, 
+  pendingUnits = [],
+  onSelectPendingUnit 
+}) => {
   const receptores = [
     "Andrés Fernando Villegas Quintero",
     "Carmenza Suarez Martinez",
@@ -244,14 +252,74 @@ export const RecepcionForm: React.FC<RecepcionFormProps> = ({ onSubmit, isSubmit
     }
   };
 
+  const handleSelectPendingForUnit = (unitToLoad: ReceivedUnitRecord, targetIndex: number = 0) => {
+    if (onSelectPendingUnit) {
+      onSelectPendingUnit(unitToLoad);
+      return;
+    }
+    const newUnits = [...units];
+    newUnits[targetIndex] = {
+      ...newUnits[targetIndex],
+      hemoderivativeType: unitToLoad.hemoderivativeType,
+      unitId: unitToLoad.unitId,
+      qualitySeal: unitToLoad.qualitySeal || unitToLoad.unitId,
+      bloodGroup: unitToLoad.bloodGroup,
+      rh: unitToLoad.rh,
+      volume: unitToLoad.volume,
+      sampleDate: unitToLoad.sampleDate,
+      expirationDate: unitToLoad.expirationDate,
+      temperature: unitToLoad.temperature || newUnits[targetIndex].temperature || '',
+      observations: unitToLoad.observations || newUnits[targetIndex].observations || '',
+    };
+    setUnits(newUnits);
+    if (unitToLoad.provider) {
+      setGeneralInfo(prev => ({ ...prev, provider: unitToLoad.provider }));
+    }
+  };
+
   return (
     <form onSubmit={handleSubmit} className="bg-white rounded-3xl shadow-xl border border-zinc-100 overflow-hidden">
       <div className="bg-blue-600 p-6 text-white">
-        <h2 className="text-2xl font-bold">{initialData ? 'Editar Recepción de Hemoderivado' : 'Formato de Recepción de Hemoderivados'}</h2>
-        <p className="text-blue-100 mt-1">{initialData ? 'Modifique la información del ingreso' : 'Complete la información del ingreso'}</p>
+        <h2 className="text-2xl font-bold">{initialData ? 'Recepción y Validación Física de Hemoderivado' : 'Formato de Recepción de Hemoderivados'}</h2>
+        <p className="text-blue-100 mt-1">
+          {initialData?.status === 'Pendiente Recepción' 
+            ? `Validación física de la unidad pre-ingresada ${initialData.unitId}` 
+            : initialData 
+            ? 'Modifique la información del ingreso' 
+            : 'Complete la información física de recepción del componente'}
+        </p>
       </div>
 
       <div className="p-8 space-y-8">
+        {/* Banner de Pre-Ingreso si hay unidades pendientes y no estamos editando */}
+        {!initialData && pendingUnits.length > 0 && (
+          <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="p-1.5 bg-indigo-600 text-white rounded-lg text-xs font-bold">Pre-Ingreso</span>
+                <p className="text-sm font-bold text-indigo-950">
+                  Hay {pendingUnits.length} unidad{pendingUnits.length > 1 ? 'es' : ''} pendiente{pendingUnits.length > 1 ? 's' : ''} de validación física:
+                </p>
+              </div>
+              <span className="text-xs text-indigo-700 font-medium">Haz clic para cargar sin errores de digitación</span>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {pendingUnits.map((p) => (
+                <button
+                  key={p.id || p.unitId}
+                  type="button"
+                  onClick={() => handleSelectPendingForUnit(p, 0)}
+                  className="px-3 py-1.5 bg-white hover:bg-indigo-600 hover:text-white border border-indigo-200 rounded-xl text-xs font-semibold text-indigo-900 transition-all flex items-center gap-1.5 shadow-sm"
+                  title="Cargar datos de esta unidad pre-ingresada"
+                >
+                  <span className="font-mono font-bold">{p.unitId}</span>
+                  <span className="text-[11px] opacity-75">({p.hemoderivativeType} {p.bloodGroup}{p.rh})</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {error && (
           <div className="bg-red-50 text-red-700 p-4 rounded-xl flex items-center gap-3 border border-red-100">
             <AlertCircle size={20} />

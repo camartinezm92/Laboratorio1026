@@ -126,7 +126,7 @@ export const LaboratorioAnalysis: React.FC = () => {
       setGeneralAnalysis(data.generalAnalysis || '');
       setMode('edit');
     } catch (err: any) {
-      console.error('Error en extracción de documento con IA:', err);
+      console.warn('Aviso en extracción de documento con IA:', err?.message || err);
       setError(err?.message || 'Error al transcribir el documento con IA. Puede completar los datos manualmente.');
       setMode('edit');
     } finally {

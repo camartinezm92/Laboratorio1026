@@ -91,10 +91,10 @@ export async function extractLabDocument(
   mimeType: string = 'image/jpeg',
   attempt: number = 1
 ): Promise<ExtractionResult> {
-  const MAX_ATTEMPTS = 3;
+  const MAX_ATTEMPTS = 4;
   let response: Response;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s client timeout
+  const timeoutId = setTimeout(() => controller.abort(), 120000); // 120s client timeout
 
   try {
     response = await fetch('/api/gemini/extract-lab', {
@@ -141,13 +141,22 @@ export async function extractLabDocument(
       return extractLabDocument(base64Data, mimeType, attempt + 1);
     }
     if (isHtmlOrReboot) {
-      throw new Error(`Servidor de transcripción ocupado (HTTP ${response.status}). Por favor reintenta este documento individualmente.`);
+      throw new Error(`El servicio de transcripción se está inicializando o procesando una carga alta. Por favor presiona reintentar en unos momentos.`);
     }
     throw new Error(`Respuesta inválida del servidor: ${rawText.slice(0, 100)}`);
   }
 
   if (!response.ok) {
-    throw new Error(json?.error || `Error en el servidor de transcripción (HTTP ${response.status})`);
+    const errorMsg = json?.error || '';
+    const isDeadlineOrBusy = response.status === 504 || response.status === 503 || 
+                             errorMsg.includes('DEADLINE_EXCEEDED') || errorMsg.includes('Deadline') || errorMsg.includes('deadline');
+    if (isDeadlineOrBusy && attempt < MAX_ATTEMPTS) {
+      const waitTime = attempt * 2000;
+      console.warn(`[Gemini Client] Timeout de deadline en servidor (intento #${attempt}). Reintentando en ${waitTime / 1000}s...`);
+      await new Promise(r => setTimeout(r, waitTime));
+      return extractLabDocument(base64Data, mimeType, attempt + 1);
+    }
+    throw new Error(errorMsg || `Error en el servidor de transcripción (HTTP ${response.status})`);
   }
 
   const result = json.data || {};

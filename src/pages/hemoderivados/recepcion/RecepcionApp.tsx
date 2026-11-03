@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Inbox, Plus, History, LogIn, LogOut, ShieldCheck, ClipboardCheck, X, AlertTriangle, Info, Layers, Droplets, LayoutGrid, Lock } from 'lucide-react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { ArrowLeft, Inbox, Plus, History, LogIn, LogOut, ShieldCheck, ClipboardCheck, X, AlertTriangle, Info, Layers, Droplets, LayoutGrid, Lock, Sparkles, Package } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { RecepcionForm } from '../components/RecepcionForm';
 import { RecepcionRecordCard } from '../components/RecepcionRecordCard';
@@ -22,13 +22,14 @@ const HEMODERIVATIVE_TYPES = [
 
 export const RecepcionApp: React.FC = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [records, setRecords] = useState<ReceivedUnitRecord[]>([]);
   const [transfusionRecords, setTransfusionRecords] = useState<any[]>([]);
   const [dispositionRecords, setDispositionRecords] = useState<any[]>([]);
   const [bloodTestRecords, setBloodTestRecords] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingRecord, setEditingRecord] = useState<ReceivedUnitRecord | null>(null);
-  const [filter, setFilter] = useState<'all' | 'available' | 'used'>('all');
+  const [filter, setFilter] = useState<'all' | 'available' | 'used' | 'pending'>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
@@ -325,6 +326,19 @@ export const RecepcionApp: React.FC = () => {
     setLoginError('Usuario o contraseña incorrectos.');
   };
 
+  // Listen for prefillUnit in query string (from Ingreso Pre-Recepción)
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const prefillUnit = params.get('prefillUnit');
+    if (prefillUnit && records.length > 0) {
+      const found = records.find(r => r.unitId === prefillUnit && r.status === 'Pendiente Recepción');
+      if (found) {
+        setEditingRecord(found);
+        setShowForm(true);
+      }
+    }
+  }, [location.search, records]);
+
   const handleSync = async () => {
     setIsSyncing(true);
     try {
@@ -350,10 +364,17 @@ export const RecepcionApp: React.FC = () => {
     try {
       console.log('Submitting records:', newRecords);
       if (editingRecord?.id) {
-        // Handle single record update
+        // Handle single record update - transition from Pendiente Recepción to Disponible/Rechazado
+        const targetStatus = newRecords[0].accepted === 'Sí' 
+          ? 'Disponible' 
+          : newRecords[0].accepted === 'No' 
+          ? 'Rechazado' 
+          : (editingRecord.status === 'Pendiente Recepción' ? 'Disponible' : (editingRecord.status || 'Disponible'));
+        
         const updateData = {
           ...editingRecord,
           ...newRecords[0],
+          status: targetStatus,
           updatedAt: getNowISO(),
           updatedBy: user.email || 'Desconocido'
         };
@@ -372,8 +393,6 @@ export const RecepcionApp: React.FC = () => {
             userEmail: user.email || 'Desconocido'
           };
           console.log('Saving new record:', fullRecord);
-          const result = await saveRecord('receivedUnits', fullRecord, user.email || 'Desconocido');
-          console.log('Save result:', result);
         }
       }
       
@@ -477,6 +496,8 @@ export const RecepcionApp: React.FC = () => {
     return { available, reserved, used };
   };
 
+  const pendingUnits = records.filter(r => r.status === 'Pendiente Recepción');
+
   const filteredRecords = records.filter(record => {
     // Type filter
     if (selectedType !== 'all' && record.hemoderivativeType !== selectedType) return false;
@@ -485,7 +506,8 @@ export const RecepcionApp: React.FC = () => {
     const isTransfused = transfusionRecords.some(t => t.unitId === record.unitId || t.qualitySeal === record.qualitySeal) ||
                         dispositionRecords.some(d => d.unitId === record.unitId || d.qualitySeal === record.qualitySeal);
     
-    if (filter === 'available') return !isTransfused;
+    if (filter === 'pending') return record.status === 'Pendiente Recepción';
+    if (filter === 'available') return !isTransfused && record.status !== 'Pendiente Recepción';
     if (filter === 'used') return isTransfused;
     return true;
   });
@@ -637,6 +659,10 @@ export const RecepcionApp: React.FC = () => {
                   onSubmit={handleSubmit} 
                   isSubmitting={isSyncing} 
                   initialData={editingRecord || undefined}
+                  pendingUnits={pendingUnits}
+                  onSelectPendingUnit={(unit) => {
+                    setEditingRecord(unit);
+                  }}
                 />
               </div>
             ) : (
@@ -743,18 +769,29 @@ export const RecepcionApp: React.FC = () => {
                       )}
                     </div>
                     
-                    <div className="flex items-center gap-2 bg-white p-1 rounded-xl border border-zinc-200 shadow-sm">
+                    <div className="flex items-center gap-2 bg-white p-1 rounded-xl border border-zinc-200 shadow-sm flex-wrap">
                       <button
                         onClick={() => setFilter('all')}
-                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                           filter === 'all' ? 'bg-zinc-900 text-white shadow-md' : 'text-zinc-500 hover:bg-zinc-50'
                         }`}
                       >
                         Todos
                       </button>
+                      {pendingUnits.length > 0 && (
+                        <button
+                          onClick={() => setFilter('pending')}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+                            filter === 'pending' ? 'bg-amber-600 text-white shadow-md' : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                          }`}
+                        >
+                          <Sparkles size={12} />
+                          <span>Pendientes ({pendingUnits.length})</span>
+                        </button>
+                      )}
                       <button
                         onClick={() => setFilter('available')}
-                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                           filter === 'available' ? 'bg-green-600 text-white shadow-md' : 'text-zinc-500 hover:bg-zinc-50'
                         }`}
                       >
@@ -762,7 +799,7 @@ export const RecepcionApp: React.FC = () => {
                       </button>
                       <button
                         onClick={() => setFilter('used')}
-                        className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
                           filter === 'used' ? 'bg-blue-600 text-white shadow-md' : 'text-zinc-500 hover:bg-zinc-50'
                         }`}
                       >
@@ -774,6 +811,39 @@ export const RecepcionApp: React.FC = () => {
                       Mostrando: <span className="font-bold text-zinc-900">{filteredRecords.length}</span> de <span className="font-bold text-zinc-900">{records.length}</span>
                     </div>
                   </div>
+
+                  {/* Banner de Unidades en Pre-Ingreso esperando Recepción */}
+                  {pendingUnits.length > 0 && filter !== 'pending' && (
+                    <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 p-4 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm">
+                      <div className="flex items-center gap-3">
+                        <div className="p-2.5 bg-amber-500 text-white rounded-xl shrink-0">
+                          <Package size={20} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-amber-950">
+                            {pendingUnits.length} unidad{pendingUnits.length > 1 ? 'es' : ''} en Pre-Ingreso pendiente{pendingUnits.length > 1 ? 's' : ''} de validación física
+                          </p>
+                          <p className="text-xs text-amber-800">
+                            Fueron leídas con IA desde el albarán y están listas para inspección de temperatura y aspectos físicos.
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 self-end sm:self-auto">
+                        <button
+                          onClick={() => setFilter('pending')}
+                          className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl transition-all shadow-sm"
+                        >
+                          Ver Pendientes
+                        </button>
+                        <button
+                          onClick={() => navigate('/hemoderivados/ingreso')}
+                          className="px-3 py-1.5 bg-white border border-amber-300 text-amber-900 text-xs font-bold rounded-xl hover:bg-amber-100 transition-all"
+                        >
+                          Nuevo Albarán IA
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
                   {filteredRecords.length === 0 ? (
                     <div className="text-center py-20 bg-white rounded-3xl border border-zinc-100 border-dashed">

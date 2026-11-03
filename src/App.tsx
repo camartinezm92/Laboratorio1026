@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, useLocation } from 'react-router-dom';
 import { MainHome } from './pages/MainHome';
 import { HemoderivadosHome } from './pages/hemoderivados/HemoderivadosHome';
+import { IngresoApp } from './pages/hemoderivados/ingreso/IngresoApp';
 import { RecepcionApp } from './pages/hemoderivados/recepcion/RecepcionApp';
 import { PreTransfusionalApp } from './pages/hemoderivados/pre-transfusional/PreTransfusionalApp';
 import { UsoApp } from './pages/hemoderivados/uso/UsoApp';
@@ -28,6 +29,8 @@ function PageTitleUpdater() {
       title = 'Gestión de Usuarios - Admin';
     } else if (path === '/hemoderivados') {
       title = 'Hemoderivados - Apoyo Diagnóstico';
+    } else if (path === '/hemoderivados/ingreso') {
+      title = 'Ingreso / Pre-Recepción con IA';
     } else if (path === '/hemoderivados/recepcion') {
       title = 'Recepción de Hemoderivados';
     } else if (path === '/hemoderivados/pre-transfusional') {
@@ -63,6 +66,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<MainHome />} />
         <Route path="/hemoderivados" element={<HemoderivadosHome />} />
+        <Route path="/hemoderivados/ingreso" element={<IngresoApp />} />
         <Route path="/hemoderivados/recepcion" element={<RecepcionApp />} />
         <Route path="/hemoderivados/pre-transfusional" element={<PreTransfusionalApp />} />
         <Route path="/hemoderivados/uso" element={<UsoApp />} />

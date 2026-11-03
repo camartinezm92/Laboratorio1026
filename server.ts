@@ -638,6 +638,90 @@ app.use(cookieParser());
 // Gemini AI Laboratory Extraction Endpoint
 let preferredGeminiKeyIndex = 0;
 
+function repairTruncatedJson(rawText: string): any {
+  let text = (rawText || '').trim();
+  if (text.startsWith('```json')) {
+    text = text.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+  } else if (text.startsWith('```')) {
+    text = text.replace(/^```\s*/, '').replace(/\s*```$/, '');
+  }
+
+  const firstBrace = text.indexOf('{');
+  if (firstBrace !== -1) {
+    text = text.substring(firstBrace);
+  }
+
+  // 1. Direct parse attempt
+  try {
+    return JSON.parse(text);
+  } catch (err) {}
+
+  // 2. If inside unclosed string, close the quote
+  let inString = false;
+  let isEscaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch.charCodeAt(0) === 92 && inString) {
+      isEscaped = !isEscaped;
+    } else {
+      if (ch === '"' && !isEscaped) inString = !inString;
+      isEscaped = false;
+    }
+  }
+  let repairedText = inString ? text + '"' : text;
+
+  // 3. Cut back to last complete parameter object brace
+  const lastValidItemBrace = repairedText.lastIndexOf('}');
+  if (lastValidItemBrace > 0) {
+    const truncatedCut = repairedText.substring(0, lastValidItemBrace + 1);
+    const stack: string[] = [];
+    let inStr2 = false;
+    let isEsc2 = false;
+    for (let i = 0; i < truncatedCut.length; i++) {
+      const ch = truncatedCut[i];
+      if (ch.charCodeAt(0) === 92 && inStr2) isEsc2 = !isEsc2;
+      else if (ch === '"' && !isEsc2) inStr2 = !inStr2;
+      else if (!inStr2) {
+        if (ch === '{') stack.push('}');
+        else if (ch === '[') stack.push(']');
+        else if (ch === '}' || ch === ']') {
+          if (stack.length > 0 && stack[stack.length - 1] === ch) stack.pop();
+        }
+      }
+      isEsc2 = false;
+    }
+    const candidate = truncatedCut + stack.reverse().join('');
+    try {
+      console.log('[Gemini Server] JSON truncado reparado con éxito recuperando parámetros completos.');
+      return JSON.parse(candidate);
+    } catch {}
+  }
+
+  // 4. Try closing brackets on repairedText
+  const stackFallback: string[] = [];
+  let inStr3 = false;
+  let isEsc3 = false;
+  for (let i = 0; i < repairedText.length; i++) {
+    const ch = repairedText[i];
+    if (ch.charCodeAt(0) === 92 && inStr3) isEsc3 = !isEsc3;
+    else if (ch === '"' && !isEsc3) inStr3 = !inStr3;
+    else if (!inStr3) {
+      if (ch === '{') stackFallback.push('}');
+      else if (ch === '[') stackFallback.push(']');
+      else if (ch === '}' || ch === ']') {
+        if (stackFallback.length > 0 && stackFallback[stackFallback.length - 1] === ch) stackFallback.pop();
+      }
+    }
+    isEsc3 = false;
+  }
+  const candidateFallback = repairedText + stackFallback.reverse().join('');
+  try {
+    return JSON.parse(candidateFallback);
+  } catch {}
+
+  throw new Error('No se pudo reparar el JSON incompleto generado por Gemini');
+}
+
 app.post('/api/gemini/extract-lab', async (req, res) => {
   try {
     const { base64Data, mimeType } = req.body;
@@ -725,9 +809,9 @@ app.post('/api/gemini/extract-lab', async (req, res) => {
               ],
               config: {
                 temperature: 0.0,
-                maxOutputTokens: 4096,
+                maxOutputTokens: 16384,
                 thinkingConfig: {
-                  thinkingLevel: model === 'gemini-3.1-flash-lite' ? ThinkingLevel.MINIMAL : ThinkingLevel.LOW
+                  thinkingLevel: ThinkingLevel.MINIMAL
                 },
                 systemInstruction: `Eres un asistente de transcripción digital clínica de máxima precisión para el laboratorio de UCI Honda.
 Tu función es extraer con EXACTITUD LITERAL los datos presentes en el informe de laboratorio.
@@ -789,34 +873,17 @@ REGLAS DE FORMATO:
               }
             });
 
-            let text = (response.text || '').trim();
-            if (text.startsWith('```json')) {
-              text = text.replace(/^```json\s*/, '').replace(/\s*```$/, '');
-            } else if (text.startsWith('```')) {
-              text = text.replace(/^```\s*/, '').replace(/\s*```$/, '');
-            }
-
-            const firstBrace = text.indexOf('{');
-            const lastBrace = text.lastIndexOf('}');
-            if (firstBrace !== -1 && lastBrace > firstBrace) {
-              text = text.substring(firstBrace, lastBrace + 1);
+            const text = response.text;
+            if (!text) {
+              throw new Error("Respuesta vacía recibida de Gemini API");
             }
 
             let parsed: any;
             try {
-              parsed = JSON.parse(text);
+              parsed = repairTruncatedJson(text);
             } catch (jsonErr: any) {
-              console.warn('[Gemini Server] JSON.parse failed, attempting repair:', jsonErr.message);
-              const lastCurly = text.lastIndexOf('}');
-              if (lastCurly > 0) {
-                try {
-                  parsed = JSON.parse(text.substring(0, lastCurly + 1));
-                } catch {
-                  throw new Error(`JSON incompleto o truncado de Gemini: ${jsonErr.message}`);
-                }
-              } else {
-                throw jsonErr;
-              }
+              console.warn("[Gemini Server] Error al procesar JSON:", jsonErr.message);
+              throw jsonErr;
             }
 
             preferredGeminiKeyIndex = keyIdx;
@@ -839,7 +906,8 @@ REGLAS DE FORMATO:
               break;
             }
 
-            const isTransient = msg.includes('503') || msg.includes('429') || msg.includes('overloaded') ||
+            const isTransient = msg.includes('503') || msg.includes('504') || msg.includes('429') || msg.includes('overloaded') ||
+                                msg.includes('DEADLINE_EXCEEDED') || msg.includes('Deadline') || msg.includes('deadline') ||
                                 msg.includes('fetch failed') || msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT') ||
                                 msg.includes('timeout') || msg.includes('socket') || msg.includes('network');
 
@@ -864,6 +932,217 @@ REGLAS DE FORMATO:
   } catch (error: any) {
     console.warn('[Gemini Server] Error en endpoint de extracción:', error?.message || error);
     return res.status(500).json({ error: error.message || 'Error interno del servidor en transcripción' });
+  }
+});
+
+// Hemoderivados Delivery Note Extraction Endpoint (Hemocentro / Bancos de Sangre)
+app.post('/api/gemini/extract-hemoderivados', async (req, res) => {
+  try {
+    const { base64Data, mimeType } = req.body;
+    if (!base64Data) {
+      return res.status(400).json({ error: 'base64Data es requerido para la extracción del albarán.' });
+    }
+
+    const explicitKeys = [
+      process.env.GEMINI_API_KEY,
+      process.env.GEMINI_API_KEY_1,
+      process.env.GEMINI_API_KEY_2,
+      process.env.GEMINI_API_KEY_3,
+      process.env.GEMINI_API_KEY_4,
+      process.env.GEMINI_API_KEY_5,
+      process.env.GEMINI_API_KEY_6,
+      process.env.GEMINI_API_KEY_7,
+      process.env.GEMINI_API_KEY_8,
+      process.env.GEMINI_API_KEY_9,
+      process.env.GEMINI_API_KEY_10,
+    ];
+
+    const dynamicKeys = Object.keys(process.env)
+      .filter(k => k.startsWith('GEMINI_API_KEY'))
+      .sort()
+      .map(k => process.env[k]);
+
+    const rawKeys = Array.from(new Set([...explicitKeys, ...dynamicKeys])).filter(Boolean) as string[];
+
+    if (rawKeys.length === 0) {
+      console.error('[Gemini Server] No GEMINI_API_KEY available in process.env');
+      return res.status(500).json({ 
+        error: 'No se ha configurado la clave GEMINI_API_KEY en el servidor.' 
+      });
+    }
+
+    const indexedKeys = rawKeys.map((k, idx) => ({ key: k, originalIndex: idx }));
+    indexedKeys.sort((a, b) => (a.originalIndex === preferredGeminiKeyIndex ? -1 : b.originalIndex === preferredGeminiKeyIndex ? 1 : 0));
+
+    const modelsToTry = [
+      'gemini-3.1-flash-lite',
+      'gemini-3.8-flash'
+    ];
+
+    let lastError: any = null;
+
+    for (const { key: apiKey, originalIndex: keyIdx } of indexedKeys) {
+      const ai = new GoogleGenAI({
+        apiKey,
+        httpOptions: {
+          timeout: 120000,
+          headers: {
+            'User-Agent': 'aistudio-build'
+          }
+        }
+      });
+
+      let keyHasPermanentError = false;
+
+      for (const model of modelsToTry) {
+        if (keyHasPermanentError) break;
+
+        let retries = 2;
+        while (retries >= 0) {
+          try {
+            console.log(`[Gemini Server - Hemoderivados] Calling model ${model} with Key #${keyIdx + 1}...`);
+            const response = await ai.models.generateContent({
+              model,
+              contents: [
+                {
+                  parts: [
+                    {
+                      text: "Analiza esta nota de remisión / albarán de entrega de banco de sangre (HEMOCENTRO) y extrae fielmente en JSON todas las unidades de hemoderivados listadas en la tabla."
+                    },
+                    {
+                      inlineData: {
+                        data: base64Data,
+                        mimeType: mimeType || 'application/pdf'
+                      }
+                    }
+                  ]
+                }
+              ],
+              config: {
+                temperature: 0.0,
+                maxOutputTokens: 16384,
+                thinkingConfig: {
+                  thinkingLevel: ThinkingLevel.MINIMAL
+                },
+                systemInstruction: `Eres un asistente de digitalización y control de calidad clínica de máxima precisión para el servicio de transfusión y hemoderivados de UCI Honda (Medicina Intensiva del Tolima).
+Tu función es extraer con EXACTITUD LITERAL la información de la nota de remisión / albarán de entrega de componentes sanguíneos (ej. Hemocentro del Café S.A.S. u otros bancos de sangre).
+
+REGLAS DE FIDELIDAD CLÍNICA ESTRICTAS:
+1. El número de serie o unidad de cada bolsa ('Unidad Nº') debe ser transcrito de forma 100% idéntica carácter por carácter (ej. '2631024051', 'AF261357'). CERO ERRORES ni omisión de dígitos o letras.
+2. Mapeo del tipo de producto ('Producto'):
+   - 'GLOBULOS R. POBRES EN LEUCOCITOS (GRPL)' o cualquier glóbulo rojo -> 'Globulos Rojos'
+   - 'PLASMA FRESCO CONGELADO (PFC)' -> 'Plasma Fresco Congelado'
+   - 'CUP AFERESIS 1 (PXA1)' o cualquier plaqueta por aféresis -> 'Plaquetas AFERESIS'
+   - 'CONCENTRADO DE PLAQUETAS' o plaquetas estándar -> 'Plaquetas (Estándar)'
+   - 'CRIOPRECIPITADO' -> 'Crioprecipitado'
+3. Grupo Sanguíneo y Rh ('Grp'):
+   - Separa en bloodGroup ('O', 'A', 'B', 'AB') y rh ('+' o '-'). Ejemplo: 'O+' -> bloodGroup: 'O', rh: '+'.
+4. Caducidad ('Caduca'):
+   - Convierte la fecha a formato ISO YYYY-MM-DD. Ejemplo: '04/12/2026' -> '2026-12-04'.
+5. Volumen ('Vol.'):
+   - Transcribe el volumen numérico en ml, agregando 'ml' (ej. '278 ml', '294 ml', '213 ml').
+6. Sello de Calidad ('qualitySeal'):
+   - Para Hemocentro, el sello de calidad es idéntico al número de la unidad ('unitId').
+7. Metadatos generales:
+   - 'albaranNumber': Número de albarán o remisión impreso (ej. '145457').
+   - 'dispatchDate': Fecha y hora de despacho (ej. '01/11/2026 12:51' o '2026-11-01').
+   - 'destination': Destino (ej. 'MEDICINA INTENSIVA DEL TOLIMA-UCI HONDA').
+   - 'provider': Por defecto 'Hemocentro' si proviene de Hemocentro del Café.
+   - Extrae también si figuran temperaturas manuscritas o impresas, observaciones o total de unidades.`,
+                responseMimeType: "application/json",
+                responseSchema: {
+                  type: Type.OBJECT,
+                  properties: {
+                    albaranNumber: { type: Type.STRING, description: "Número de Albarán o Remisión" },
+                    dispatchDate: { type: Type.STRING, description: "Fecha de expedición o despacho" },
+                    provider: { type: Type.STRING, description: "Proveedor (ej. Hemocentro, Hemolife, FUHECO)" },
+                    destination: { type: Type.STRING, description: "Destinatario (ej. MEDICINA INTENSIVA DEL TOLIMA-UCI HONDA)" },
+                    totalUnitsDeclared: { type: Type.NUMBER, description: "Total de unidades indicadas en el documento" },
+                    documentTemperature: { type: Type.STRING, description: "Temperatura registrada en el documento si aplica" },
+                    observations: { type: Type.STRING, description: "Observaciones del documento" },
+                    units: {
+                      type: Type.ARRAY,
+                      items: {
+                        type: Type.OBJECT,
+                        properties: {
+                          productType: { 
+                            type: Type.STRING, 
+                            enum: ['Globulos Rojos', 'Plasma Fresco Congelado', 'Plaquetas AFERESIS', 'Plaquetas (Estándar)', 'Crioprecipitado'] 
+                          },
+                          rawProduct: { type: Type.STRING, description: "Texto original impreso del producto" },
+                          unitId: { type: Type.STRING, description: "Número de unidad / serie de la bolsa exacto" },
+                          qualitySeal: { type: Type.STRING, description: "Sello de calidad (igual a unitId en Hemocentro)" },
+                          bloodGroup: { type: Type.STRING, enum: ['A', 'B', 'AB', 'O'] },
+                          rh: { type: Type.STRING, enum: ['+', '-'] },
+                          phenotype: { type: Type.STRING, description: "Fenotipo C E c e si figura" },
+                          expirationDate: { type: Type.STRING, description: "Fecha de vencimiento en formato YYYY-MM-DD" },
+                          volume: { type: Type.STRING, description: "Volumen con unidades, ej. 278 ml" },
+                          observations: { type: Type.STRING, description: "Observaciones específicas de la unidad" }
+                        },
+                        required: ['productType', 'unitId', 'expirationDate']
+                      }
+                    }
+                  },
+                  required: ['units']
+                }
+              }
+            });
+
+            const text = response.text;
+            if (!text) {
+              throw new Error("Respuesta vacía recibida de Gemini API");
+            }
+
+            let parsed: any;
+            try {
+              parsed = repairTruncatedJson(text);
+            } catch (jsonErr: any) {
+              console.warn("[Gemini Server - Hemoderivados] Error al procesar JSON:", jsonErr.message);
+              throw jsonErr;
+            }
+
+            preferredGeminiKeyIndex = keyIdx;
+            console.log(`[Gemini Server - Hemoderivados] Successfully extracted ${parsed.units?.length || 0} units using model ${model} (Key #${keyIdx + 1})`);
+            return res.json({
+              success: true,
+              data: parsed,
+              modelUsed: model,
+              keyIndexUsed: keyIdx + 1
+            });
+          } catch (err: any) {
+            lastError = err;
+            const msg = err?.message || String(err);
+            console.warn(`[Gemini Server - Hemoderivados] Aviso con modelo ${model} (Key #${keyIdx + 1}):`, msg);
+            
+            if (msg.includes('PERMISSION_DENIED') || msg.includes('403') || msg.includes('API_KEY_INVALID')) {
+              keyHasPermanentError = true;
+              break;
+            }
+
+            const isTransient = msg.includes('503') || msg.includes('504') || msg.includes('429') || msg.includes('overloaded') ||
+                                msg.includes('DEADLINE_EXCEEDED') || msg.includes('Deadline') || msg.includes('deadline') ||
+                                msg.includes('fetch failed') || msg.includes('ECONNRESET') || msg.includes('ETIMEDOUT') ||
+                                msg.includes('timeout') || msg.includes('socket') || msg.includes('network');
+
+            if (isTransient && retries > 0) {
+              const waitMs = (3 - retries) * 1500;
+              await new Promise(r => setTimeout(r, waitMs));
+              retries--;
+            } else {
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    const errStatus = typeof lastError?.status === 'number' && lastError.status >= 400 && lastError.status < 600 ? lastError.status : 500;
+    return res.status(errStatus).json({
+      error: lastError?.message || 'Error durante la extracción de hemoderivados con Gemini API'
+    });
+  } catch (error: any) {
+    console.warn('[Gemini Server - Hemoderivados] Error en endpoint:', error?.message || error);
+    return res.status(500).json({ error: error.message || 'Error interno del servidor en extracción de hemoderivados' });
   }
 });
 

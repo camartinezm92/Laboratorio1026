@@ -68,7 +68,11 @@ export const RecepcionRecordCard: React.FC<RecepcionRecordCardProps> = ({
       </div>
 
       <div className="flex items-start gap-4 mb-6">
-        <div className={`p-3 rounded-2xl ${record.accepted === 'Sí' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+        <div className={`p-3 rounded-2xl ${
+          record.status === 'Pendiente Recepción' ? 'bg-amber-50 text-amber-600' :
+          record.accepted === 'Sí' ? 'bg-green-50 text-green-600' : 
+          'bg-red-50 text-red-600'
+        }`}>
           <Package size={24} />
         </div>
         <div className="flex-1">
@@ -109,23 +113,31 @@ export const RecepcionRecordCard: React.FC<RecepcionRecordCardProps> = ({
                 Novedad Reclasificación
               </span>
             )}
-            {record.accepted === 'Sí' && (
-              <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${
-                isUsed ? 'bg-blue-100 text-blue-700' : 
-                isReserved ? 'bg-orange-100 text-orange-700' : 
-                'bg-green-100 text-green-700'
-              }`}>
-                {isUsed ? 'Utilizada' : isReserved ? 'Reservada' : 'Disponible'}
-              </span>
-            )}
-            {record.accepted === 'Sí' ? (
-              <span className="flex items-center gap-1 text-sm font-bold text-green-600">
-                <CheckCircle size={16} /> Aceptado
+            {record.status === 'Pendiente Recepción' ? (
+              <span className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 flex items-center gap-1">
+                Pre-Ingreso (Pendiente)
               </span>
             ) : (
-              <span className="flex items-center gap-1 text-sm font-bold text-red-600">
-                <XCircle size={16} /> Rechazado
-              </span>
+              <>
+                {record.accepted === 'Sí' && (
+                  <span className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider ${
+                    isUsed ? 'bg-blue-100 text-blue-700' : 
+                    isReserved ? 'bg-orange-100 text-orange-700' : 
+                    'bg-green-100 text-green-700'
+                  }`}>
+                    {isUsed ? 'Utilizada' : isReserved ? 'Reservada' : 'Disponible'}
+                  </span>
+                )}
+                {record.accepted === 'Sí' ? (
+                  <span className="flex items-center gap-1 text-sm font-bold text-green-600">
+                    <CheckCircle size={16} /> Aceptado
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-sm font-bold text-red-600">
+                    <XCircle size={16} /> Rechazado
+                  </span>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -133,6 +145,18 @@ export const RecepcionRecordCard: React.FC<RecepcionRecordCardProps> = ({
         {record.accepted === 'No' && record.rejectionReason && (
           <div className="mt-2 p-3 bg-red-50 rounded-xl border border-red-100">
             <p className="text-sm text-red-800"><span className="font-bold">Motivo:</span> {record.rejectionReason}</p>
+          </div>
+        )}
+
+        {record.status === 'Pendiente Recepción' && onEdit && (
+          <div className="mt-4">
+            <button
+              onClick={() => onEdit(record)}
+              className="w-full flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-4 py-2.5 rounded-xl font-bold transition-all shadow-sm"
+            >
+              <CheckCircle size={16} />
+              <span>Validar e Inspeccionar Físicamente</span>
+            </button>
           </div>
         )}
 
